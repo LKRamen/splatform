@@ -56,6 +56,26 @@ REALISM_CONFIG = {
     'noise_proj_grav': 0.02,         # unit-vector IMU tilt noise (ASSUMPTION)
 }
 
+# PF-5: contact/friction realism. Foot collision spheres have priority=1, so the
+# *foot* friction dominates the foot-floor contact; the floor's own friction then
+# governs object-floor contacts (objects have no priority). Hand-object friction
+# is applied to object/hand geoms when manipulation objects exist (PF-8).
+CONTACT_CONFIG = {
+    'foot_floor_friction': 0.6,       # slide; foot dominates contact (priority=1)
+    'object_floor_friction': 0.5,     # slide; floor's value for object contacts
+    'hand_object_friction': 0.8,      # slide; for pushed/carried objects (PF-8)
+    'floor_solref': (0.02, 1.0),      # contact (timeconst, dampratio)
+    'floor_solimp': (0.9, 0.95, 0.001, 0.5, 2.0),  # (dmin,dmax,width,mid,power) — no sink/jitter
+}
+
+# PF-5: domain randomization (off by default). Standard sim-to-real hardening:
+# per-episode resampling so a policy cannot overfit one friction/mass point.
+DOMAIN_RAND_CONFIG = {
+    'foot_friction_range': (0.4, 1.0),    # slide friction sampled per episode
+    'object_mass_range': (0.5, 3.0),      # kg, applied to an 'object' body if present
+    'payload_offset_range': (-0.5, 0.5),  # kg, added to a carried payload if present
+}
+
 
 class _DynamicObstacle:
     """Pedestrian-like obstacle with bounded random walk in XZ plane."""
@@ -93,9 +113,16 @@ class G1TraversalEnv(gym.Env):
     metadata = {'render_modes': []}
 
     def __init__(self, waypoints=None, verbose_physical=False,
-                 realism_enabled=False, realism_config=None):
+                 realism_enabled=False, realism_config=None,
+                 domain_rand_enabled=False, contact_config=None,
+                 domain_rand_config=None):
         super().__init__()
-        self.model = mujoco.MjModel.from_xml_path(_XML_PATH)
+
+        # PF-5: contact config drives the floor + foot friction at build time.
+        self._contact = dict(CONTACT_CONFIG)
+        if contact_config:
+            self._contact.update(contact_config)
+        self.model = self._build_model()
         self.data = mujoco.MjData(self.model)
 
         # PF-1: make actuators physical. The G1 menagerie model already encodes
@@ -162,8 +189,87 @@ class G1TraversalEnv(gym.Env):
         self._jnt_lo = jnt_range[:, 0].copy()
         self._jnt_hi = jnt_range[:, 1].copy()
 
+        # PF-5: foot-floor friction + domain randomization.
+        self._foot_geom_ids = self._find_foot_geoms()
+        self._apply_contact_friction()
+        self._domain_rand_enabled = bool(domain_rand_enabled)
+        self._dr = dict(DOMAIN_RAND_CONFIG)
+        if domain_rand_config:
+            self._dr.update(domain_rand_config)
+        self._dr_state = {}   # last per-episode sampled values (for inspection)
+
     def set_waypoints(self, waypoints):
         self.waypoints = list(waypoints)
+
+    # ------------------------------------------------------------------
+    # PF-5: model build (adds a real floor) + contact/friction realism
+    # ------------------------------------------------------------------
+    def _build_model(self):
+        """Load g1.xml and add a ground plane with documented contact params.
+
+        Uses MjSpec so asset paths in the vendored menagerie model still resolve
+        (an out-of-dir <include> would break them). Without a floor the robot has
+        no foot-floor contact and free-falls under physics; the floor makes
+        foot-floor friction (PF-5) meaningful.
+        """
+        spec = mujoco.MjSpec.from_file(_XML_PATH)
+        floor = spec.worldbody.add_geom()
+        floor.name = 'floor'
+        floor.type = mujoco.mjtGeom.mjGEOM_PLANE
+        floor.size = [0.0, 0.0, 0.05]
+        floor.condim = 3
+        # Floor slide friction governs object-floor contacts (feet override it
+        # via priority=1). solref/solimp tuned to avoid penetration & jitter.
+        floor.friction = [self._contact['object_floor_friction'], 0.005, 0.0001]
+        floor.solref = list(self._contact['floor_solref'])
+        floor.solimp = list(self._contact['floor_solimp'])
+        return spec.compile()
+
+    def _find_foot_geoms(self):
+        """Geom ids of the foot collision spheres (on the ankle_roll links)."""
+        ids = []
+        for i in range(self.model.ngeom):
+            if self.model.geom_type[i] != mujoco.mjtGeom.mjGEOM_SPHERE:
+                continue
+            bid = self.model.geom_bodyid[i]
+            bname = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, bid) or ''
+            if 'ankle_roll' in bname:
+                ids.append(i)
+        return ids
+
+    def _apply_contact_friction(self):
+        """Set foot slide friction from config (dominates foot-floor contact)."""
+        mu = self._contact['foot_floor_friction']
+        for gid in self._foot_geom_ids:
+            self.model.geom_friction[gid][0] = mu
+
+    def domain_randomization(self):
+        """Resample per-episode contact/payload params (PF-5; off by default).
+
+        Samples foot slide friction (applied to the foot geoms), object mass and
+        a payload offset. Mass/payload are applied to bodies named 'object' /
+        'payload' when present (manipulation tasks, PF-8); otherwise the sampled
+        values are still recorded in ``_dr_state`` for inspection. Returns the
+        sampled values.
+        """
+        lo, hi = self._dr['foot_friction_range']
+        friction = float(self._rng.uniform(lo, hi))
+        for gid in self._foot_geom_ids:
+            self.model.geom_friction[gid][0] = friction
+
+        obj_mass = float(self._rng.uniform(*self._dr['object_mass_range']))
+        payload = float(self._rng.uniform(*self._dr['payload_offset_range']))
+        for body_name, mass in (('object', obj_mass), ('payload', obj_mass + payload)):
+            bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            if bid != -1:
+                self.model.body_mass[bid] = max(mass, 0.01)
+
+        self._dr_state = {
+            'foot_friction': friction,
+            'object_mass': obj_mass,
+            'payload_offset': payload,
+        }
+        return self._dr_state
 
     # ------------------------------------------------------------------
     # PF-1: physical actuation
@@ -259,6 +365,8 @@ class G1TraversalEnv(gym.Env):
         mujoco.mj_resetData(self.model, self.data)
         if self.model.nkey > 0:
             mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
+        if self._domain_rand_enabled:
+            self.domain_randomization()   # PF-5: resample contact/payload params
         mujoco.mj_forward(self.model, self.data)
 
         self.waypoints = list(self._default_waypoints)

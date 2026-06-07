@@ -288,3 +288,24 @@ push-based unless a task explicitly opts into an assumed dexterous hand.
   158 steps ideal vs 16 steps with realism on (return 44.8 -> 4.2). That gap IS
   the sim-to-real risk. Ideal obs deterministic, realistic obs noisy (std ~0.05).
   Regression: test_env / test_saturation / server import all still pass.
+
+### PF-5 — Contact/friction realism + domain randomization — COMPLETE
+- **Floor added** (fidelity fix): the env loaded g1.xml (robot only, no ground),
+  so under physics the robot free-fell and only stood via the kinematic
+  preview_step. `_build_model()` now uses MjSpec to add a ground plane (asset
+  paths preserved, unlike an out-of-dir <include>) with tuned solref
+  (0.02,1) / solimp (0.9,0.95,0.001,0.5,2) to avoid sink/jitter. The robot can
+  now actually stand on physics (home pose survives 400 steps).
+- `CONTACT_CONFIG`: foot-floor friction 0.6 (foot geoms, priority=1 → dominates
+  foot-floor contact), object-floor friction 0.5 (floor's value, governs object
+  contacts), hand-object friction 0.8 (for PF-8 objects). Foot geoms found by
+  ankle_roll body membership.
+- `domain_randomization()` (off by default; `domain_rand_enabled`): per-episode
+  samples foot slide friction (applied to foot geoms), object mass, payload
+  offset; applies mass to `object`/`payload` bodies when present (PF-8) and
+  records `_dr_state`. Called from `reset()` when enabled.
+- Test (`test_domain_rand.py`): 5 episodes, foot friction varies 0.41-0.93 and
+  object mass varies, obs stays finite (no exploding contacts), off by default.
+- Side effect: PF-4 realism A/B gap on the *standing* home policy shrank (158-vs-16
+  steps was a no-floor artifact; now both stand 400 steps with a small ~0.07
+  return gap). Realism mechanism still verified directly (noisy obs std ~0.05).
