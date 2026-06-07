@@ -110,37 +110,199 @@ async function tryLoadSplat() {
 tryLoadSplat();
 
 // ------------------------------------------------------------------
-// Robot — load GLB or build capsule placeholder
+// Robot — load GLB if it has a real skeleton, else build a clean
+// procedural humanoid rig from primitives.
 // ------------------------------------------------------------------
 let robotGroup = new THREE.Group();
 scene.add(robotGroup);
 
-// Joint bone map (populated when GLB loads)
-const jointBones = {};
-
+// Joint order is locked by CLAUDE.md (matches MuJoCo Menagerie H1 actuators).
 const JOINT_NAMES = [
-  'left_hip_yaw','left_hip_roll','left_hip_pitch','left_knee','left_ankle',
-  'right_hip_yaw','right_hip_roll','right_hip_pitch','right_knee','right_ankle',
+  'left_hip_yaw', 'left_hip_roll', 'left_hip_pitch', 'left_knee', 'left_ankle',
+  'right_hip_yaw', 'right_hip_roll', 'right_hip_pitch', 'right_knee', 'right_ankle',
   'torso',
-  'left_shoulder_pitch','left_shoulder_roll','left_shoulder_yaw','left_elbow',
-  'right_shoulder_pitch','right_shoulder_roll','right_shoulder_yaw','right_elbow',
+  'left_shoulder_pitch', 'left_shoulder_roll', 'left_elbow',
+  'right_shoulder_pitch', 'right_shoulder_roll', 'right_elbow',
+  'left_wrist_roll', 'right_wrist_roll',
 ];
 
-function buildCapsulePlaceholder() {
+// Joint bone map (populated only when a skinned GLB loads).
+const jointBones = {};
+
+// applyJoints(joints) is set by whichever robot builder wins (GLB or
+// procedural). It maps the 19 incoming angles onto rotation axes.
+let applyJoints = () => {};
+
+// ------------------------------------------------------------------
+// Procedural H1 rig (1.8 m, 47 kg proportions)
+// ------------------------------------------------------------------
+const ROBOT_TEAL = 0x00e5cc;
+
+/**
+ * Create a named pivot Object3D with a primitive mesh child offset so the
+ * limb extends away from the pivot point.
+ * @param {string} name
+ * @param {THREE.BufferGeometry} geometry
+ * @param {THREE.Material} material
+ * @param {[number, number, number]} meshOffset local offset of the mesh
+ * @returns {THREE.Object3D}
+ */
+function makeSegment(name, geometry, material, meshOffset) {
+  const pivot = new THREE.Object3D();
+  pivot.name = name;
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(meshOffset[0], meshOffset[1], meshOffset[2]);
+  mesh.castShadow = true;
+  pivot.add(mesh);
+  return pivot;
+}
+
+/**
+ * Build one arm chain: upper_arm -> forearm -> hand, hanging downward from
+ * the shoulder pivot so rotations read naturally.
+ * @param {'left'|'right'} side
+ * @param {THREE.Material} material
+ * @returns {Record<string, THREE.Object3D>} segments keyed by name
+ */
+function buildArm(side, material) {
+  const sx = side === 'left' ? 1 : -1;
+  const upper = makeSegment(`${side}_upper_arm`,
+    new THREE.CapsuleGeometry(0.05, 0.22, 4, 10), material, [0, -0.14, 0]);
+  upper.position.set(sx * 0.20, 0.56, 0);
+
+  const fore = makeSegment(`${side}_forearm`,
+    new THREE.CapsuleGeometry(0.045, 0.20, 4, 10), material, [0, -0.13, 0]);
+  fore.position.set(0, -0.28, 0);
+  upper.add(fore);
+
+  const hand = makeSegment(`${side}_hand`,
+    new THREE.BoxGeometry(0.08, 0.1, 0.05), material, [0, -0.06, 0]);
+  hand.position.set(0, -0.26, 0);
+  fore.add(hand);
+
+  return { [`${side}_upper_arm`]: upper, [`${side}_forearm`]: fore, [`${side}_hand`]: hand };
+}
+
+/**
+ * Build one leg chain: thigh -> shin -> foot, hanging downward so the feet
+ * reach the floor when the rig root sits at pelvis height.
+ * @param {'left'|'right'} side
+ * @param {THREE.Material} material
+ * @returns {Record<string, THREE.Object3D>} segments keyed by name
+ */
+function buildLeg(side, material) {
+  const sx = side === 'left' ? 1 : -1;
+  const thigh = makeSegment(`${side}_thigh`,
+    new THREE.CapsuleGeometry(0.08, 0.30, 4, 10), material, [0, -0.22, 0]);
+  thigh.position.set(sx * 0.10, 0, 0);
+
+  const shin = makeSegment(`${side}_shin`,
+    new THREE.CapsuleGeometry(0.07, 0.30, 4, 10), material, [0, -0.22, 0]);
+  shin.position.set(0, -0.44, 0);
+  thigh.add(shin);
+
+  const foot = makeSegment(`${side}_foot`,
+    new THREE.BoxGeometry(0.10, 0.06, 0.24), material, [0, -0.03, 0.07]);
+  foot.position.set(0, -0.44, 0);
+  shin.add(foot);
+
+  return { [`${side}_thigh`]: thigh, [`${side}_shin`]: shin, [`${side}_foot`]: foot };
+}
+
+/**
+ * Build a clean teal humanoid from capsules and boxes with a correct
+ * parent-child hierarchy so every joint animates its descendants.
+ * @returns {{ root: THREE.Object3D, segments: Record<string, THREE.Object3D> }}
+ */
+function buildProceduralRobot() {
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: ROBOT_TEAL, metalness: 0.35, roughness: 0.5,
+  });
+
+  // Torso (root): pelvis at the rig origin, body extends upward.
+  const torso = makeSegment('torso',
+    new THREE.CapsuleGeometry(0.16, 0.42, 6, 12), bodyMat, [0, 0.34, 0]);
+  const head = makeSegment('head',
+    new THREE.SphereGeometry(0.13, 16, 16), bodyMat, [0, 0, 0]);
+  head.position.set(0, 0.72, 0);
+  torso.add(head);
+
+  const segments = { torso, head };
+  for (const side of ['left', 'right']) {
+    const arm = buildArm(side, bodyMat);
+    const leg = buildLeg(side, bodyMat);
+    Object.assign(segments, arm, leg);
+    torso.add(arm[`${side}_upper_arm`], leg[`${side}_thigh`]);
+  }
+  return { root: torso, segments };
+}
+
+// Maps each of the 19 joints (in JOINT_NAMES order) to a rig segment and the
+// local rotation axis it drives: hip yaw=Y / roll=Z / pitch=X,
+// knee/ankle/elbow = pitch(X), shoulder pitch=X / roll=Z, wrist = roll(Y),
+// torso = yaw(Y).
+const JOINT_TARGETS = [
+  ['left_thigh', 'y'],   // left_hip_yaw
+  ['left_thigh', 'z'],   // left_hip_roll
+  ['left_thigh', 'x'],   // left_hip_pitch
+  ['left_shin', 'x'],    // left_knee
+  ['left_foot', 'x'],    // left_ankle
+  ['right_thigh', 'y'],  // right_hip_yaw
+  ['right_thigh', 'z'],  // right_hip_roll
+  ['right_thigh', 'x'],  // right_hip_pitch
+  ['right_shin', 'x'],   // right_knee
+  ['right_foot', 'x'],   // right_ankle
+  ['torso', 'y'],        // torso
+  ['left_upper_arm', 'x'],   // left_shoulder_pitch
+  ['left_upper_arm', 'z'],   // left_shoulder_roll
+  ['left_forearm', 'x'],     // left_elbow
+  ['right_upper_arm', 'x'],  // right_shoulder_pitch
+  ['right_upper_arm', 'z'],  // right_shoulder_roll
+  ['right_forearm', 'x'],    // right_elbow
+  ['left_hand', 'y'],    // left_wrist_roll
+  ['right_hand', 'y'],   // right_wrist_roll
+];
+
+function installProceduralRobot() {
+  const { root, segments } = buildProceduralRobot();
+  robotGroup.add(root);
+  applyJoints = (joints) => {
+    for (let i = 0; i < JOINT_NAMES.length; i++) {
+      const target = JOINT_TARGETS[i];
+      const obj = segments[target[0]];
+      if (obj) obj.rotation[target[1]] = joints[i] || 0;
+    }
+  };
+  console.log('[robot] using procedural humanoid rig');
+}
+
+function installGlbRobot(gltf, bones) {
+  robotGroup.add(gltf.scene);
+  for (const bone of bones) {
+    const name = bone.name.toLowerCase().replace(/_link$/, '');
+    if (JOINT_NAMES.includes(name)) jointBones[name] = bone;
+  }
+  applyJoints = (joints) => {
+    for (let i = 0; i < JOINT_NAMES.length; i++) {
+      const bone = jointBones[JOINT_NAMES[i]];
+      if (bone) bone.rotation.x = joints[i] || 0; // GLB revolute on X
+    }
+  };
+  console.log('[robot] using GLB skeleton');
+}
+
+// Preserved for reference — superseded by buildProceduralRobot().
+function buildCapsulePlaceholder_old() {
   const mat = new THREE.MeshLambertMaterial({ color: 0x00e5cc });
-  // Torso
   const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.6, 4, 8), mat);
   torso.position.set(0, 1.0, 0);
-  // Head
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), mat);
   head.position.set(0, 1.55, 0);
-  // Arms
   for (const sx of [-1, 1]) {
     const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.4, 4, 8), mat);
     arm.position.set(sx * 0.3, 0.9, 0);
     robotGroup.add(arm);
   }
-  // Legs
   for (const sx of [-1, 1]) {
     const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.5, 4, 8), mat);
     leg.position.set(sx * 0.12, 0.45, 0);
@@ -153,17 +315,25 @@ const loader = new GLTFLoader();
 loader.load(
   '/assets/h1.glb',
   (gltf) => {
-    robotGroup.add(gltf.scene);
-    // Map bone names to joints
+    // Only trust the GLB if it carries a real skinned skeleton with bones.
+    const bones = [];
     gltf.scene.traverse((obj) => {
-      if (obj.isBone || obj.isSkinnedMesh) {
-        const name = obj.name.toLowerCase().replace(/_link$/, '');
-        if (JOINT_NAMES.includes(name)) jointBones[name] = obj;
+      if (obj.isSkinnedMesh && obj.skeleton && obj.skeleton.bones.length > 0) {
+        bones.push(...obj.skeleton.bones);
       }
     });
+    if (bones.length > 0) {
+      installGlbRobot(gltf, bones);
+    } else {
+      console.log('[robot] GLB has no valid skeleton — falling back to procedural rig');
+      installProceduralRobot();
+    }
   },
   undefined,
-  () => buildCapsulePlaceholder()
+  () => {
+    console.log('[robot] GLB failed to load — falling back to procedural rig');
+    installProceduralRobot();
+  }
 );
 
 // ------------------------------------------------------------------
@@ -271,12 +441,8 @@ function handleFrame(frame) {
   robotGroup.position.set(px, py, pz);
   robotGroup.rotation.y = frame.heading;
 
-  // Update joint bones if GLB is loaded
-  frame.joints.forEach((angle, i) => {
-    const name = JOINT_NAMES[i];
-    const bone = jointBones[name];
-    if (bone) bone.rotation.x = angle;  // simplified: all revolute on X
-  });
+  // Drive the active robot rig (procedural or GLB) from the joint stream.
+  if (frame.joints) applyJoints(frame.joints);
 
   // Follow camera
   const behind = new THREE.Vector3(
