@@ -217,3 +217,25 @@ Single source of truth for real Unitree G1 numbers. Two honesty tiers:
 Base G1 (and this 29-DOF model) has **no actuated fingers** → cannot grasp.
 The model's `rubber_hand` geoms are fixed. PF-8 reframes manipulation as
 push-based unless a task explicitly opts into an assumed dexterous hand.
+
+### PF-1 — Actuator clamps + saturation logging — COMPLETE
+- `src/backend/physical/saturation.py`: `SaturationLogger` — per joint per
+  episode tracks peak |torque|, % of peak rating, near-limit "saturation event"
+  steps (within 2% of limit), and the same for velocity. Validates inputs.
+- `g1_env.py`: imports limits from `g1_specs` (no hardcoding). `__init__` calls
+  `verify_against_model()`, drives MuJoCo `jnt_actfrcrange` from the spec
+  (`_apply_force_limits`), and builds the logger. `step()` clamps position
+  targets to ctrlrange (`_apply_control`) and records realised torque via
+  `qfrc_actuator[6:6+n]` (post-clamp, so it respects the physics-enforced peak)
+  plus joint velocity. `reset()` resets the logger.
+- Old actuation kept as `_apply_control_old()` (don't delete working code).
+- `get_saturation_report()` / `print_saturation_summary()`; auto-print at episode
+  end only when `verbose_physical=True` (default False → no training spam).
+- Test (`test_saturation.py`): random policy saturates all 29 joints to 100% of
+  peak (expected — random position targets slam the kp=500 servos into the force
+  limit), left_wrist_roll velocity flagged at 139% of the assumed limit. All
+  joints stay within the physics-enforced peak. Original env smoke test still
+  passes; server imports OK.
+- Design note: G1 uses position actuators, so torque cannot be commanded
+  directly; the realised joint torque is bounded by jnt_actfrcrange. We set that
+  range from the spec so physics (not just Python) enforces the real limit.

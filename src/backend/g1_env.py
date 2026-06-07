@@ -18,6 +18,8 @@ from src.training.rewards import (
     energy_reward,
     completion_reward,
 )
+from src.backend import g1_specs
+from src.backend.physical.saturation import SaturationLogger
 
 _XML_PATH = os.path.join(os.path.dirname(__file__), '../../mujoco_menagerie/unitree_g1/g1.xml')
 
@@ -74,10 +76,23 @@ class G1TraversalEnv(gym.Env):
 
     metadata = {'render_modes': []}
 
-    def __init__(self, waypoints=None):
+    def __init__(self, waypoints=None, verbose_physical=False):
         super().__init__()
         self.model = mujoco.MjModel.from_xml_path(_XML_PATH)
         self.data = mujoco.MjData(self.model)
+
+        # PF-1: make actuators physical. The G1 menagerie model already encodes
+        # per-joint torque limits via jnt_actfrcrange; verify the spec single
+        # source of truth still matches the model, then drive the physics force
+        # limits from the spec so Python clamps and MuJoCo agree by construction.
+        g1_specs.verify_against_model(self.model)
+        self._peak_torque = g1_specs.peak_torque_array()
+        self._vel_limit = g1_specs.velocity_limit_array()
+        self._apply_force_limits()
+        self._verbose_physical = verbose_physical
+        self._sat_logger = SaturationLogger(
+            list(g1_specs.JOINT_NAMES), self._peak_torque, self._vel_limit
+        )
 
         # Dimensions derived from the model: nu actuated joints, free base
         # occupies qpos[:7] / qvel[:6].
@@ -115,6 +130,64 @@ class G1TraversalEnv(gym.Env):
     def set_waypoints(self, waypoints):
         self.waypoints = list(waypoints)
 
+    # ------------------------------------------------------------------
+    # PF-1: physical actuation
+    # ------------------------------------------------------------------
+    def _apply_force_limits(self):
+        """Drive MuJoCo's per-joint force limits from the G1 spec.
+
+        Position actuators (kp=500) cannot have a torque commanded directly, so
+        the realised joint torque is bounded by jnt_actfrcrange. We set those
+        ranges from g1_specs.PEAK_TORQUE so the physics engine — not just Python
+        — enforces the real limits. The menagerie values already match the spec
+        (asserted in verify_against_model), so this is authoritative, not a tweak.
+        """
+        for i, name in enumerate(g1_specs.JOINT_NAMES):
+            jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            peak = float(self._peak_torque[i])
+            self.model.jnt_actfrcrange[jid] = [-peak, peak]
+            self.model.jnt_actfrclimited[jid] = 1
+
+    def _apply_control(self, action):
+        """Map policy action in [-1,1] to clamped joint position targets.
+
+        The commanded position is clamped to each actuator's ctrlrange so we
+        never command outside the joint's physical range; the resulting torque
+        is then bounded by the force limits set in _apply_force_limits().
+        """
+        mid = (self._jnt_lo + self._jnt_hi) * 0.5
+        half = (self._jnt_hi - self._jnt_lo) * 0.5
+        target = mid + action * half
+        lo = self.model.actuator_ctrlrange[:, 0]
+        hi = self.model.actuator_ctrlrange[:, 1]
+        self.data.ctrl[:] = np.clip(target, lo, hi)
+
+    def _apply_control_old(self, action):
+        """Original near-ideal actuation (kept for reference; PF-1)."""
+        mid = (self._jnt_lo + self._jnt_hi) * 0.5
+        half = (self._jnt_hi - self._jnt_lo) * 0.5
+        self.data.ctrl[:] = mid + action * half
+
+    def _log_saturation(self):
+        """Record this step's realised joint torque & velocity (PF-1).
+
+        Uses qfrc_actuator (the actuator torque applied in joint space *after*
+        jnt_actfrcrange clamping) rather than actuator_force (the pre-clamp
+        servo output), so the logged torque is the one the joint truly delivers
+        and stays within the physics-enforced peak.
+        """
+        torque = self.data.qfrc_actuator[6:6 + self.n_joints]
+        velocity = self.data.qvel[6:6 + self.n_joints]
+        self._sat_logger.update(torque, velocity)
+
+    def get_saturation_report(self):
+        """Per-joint saturation stats for the current episode (PF-1)."""
+        return self._sat_logger.report()
+
+    def print_saturation_summary(self, warn_pct=80.0):
+        """Print the compact per-joint saturation summary (PF-1)."""
+        print(self._sat_logger.summary_str(warn_pct=warn_pct))
+
     def home_pose_action(self):
         """Action in [-1,1] that commands the home keyframe joint pose.
 
@@ -145,6 +218,7 @@ class G1TraversalEnv(gym.Env):
         self._reached_all = False
         self._obstacles = [_DynamicObstacle(self._rng) for _ in range(_NUM_OBSTACLES)]
         self._prev_dist = self._goal_dist()
+        self._sat_logger.reset()
         return self._get_obs(), {}
 
     def preview_step(self):
@@ -201,13 +275,12 @@ class G1TraversalEnv(gym.Env):
     def step(self, action):
         action = np.clip(action, -1.0, 1.0)
 
-        # Scale [-1,1] to joint position targets.
-        mid = (self._jnt_lo + self._jnt_hi) * 0.5
-        half = (self._jnt_hi - self._jnt_lo) * 0.5
-        self.data.ctrl[:] = mid + action * half
+        # PF-1: clamped position targets + physics-enforced torque limits.
+        self._apply_control(action)
 
         mujoco.mj_step(self.model, self.data)
         self._step_count += 1
+        self._log_saturation()
 
         for obs in self._obstacles:
             obs.step()
@@ -249,6 +322,9 @@ class G1TraversalEnv(gym.Env):
 
         terminated = self._is_terminated()
         truncated = self._step_count >= _MAX_STEPS
+
+        if (terminated or truncated) and self._verbose_physical:
+            self.print_saturation_summary()
 
         info = {
             'scores': {
