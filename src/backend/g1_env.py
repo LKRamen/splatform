@@ -24,6 +24,7 @@ from src.backend import g1_specs
 from src.backend.physical.saturation import SaturationLogger
 from src.backend.physical.power import PowerLogger
 from src.backend.physical.thermal import ThermalLogger
+from src.backend.physical.stability import StabilityLogger, convex_hull
 
 _XML_PATH = os.path.join(os.path.dirname(__file__), '../../mujoco_menagerie/unitree_g1/g1.xml')
 
@@ -140,6 +141,13 @@ class G1TraversalEnv(gym.Env):
         self._power_logger = PowerLogger()
         self._thermal_logger = ThermalLogger(
             g1_specs.continuous_torque_array(), self.model.opt.timestep
+        )
+        # PF-6: stability/payload. Arm peak from spec (shoulder ~25 N·m).
+        self._floor_geom_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_GEOM, 'floor')
+        self._stability_logger = StabilityLogger(
+            g1_specs.PEAK_TORQUE_NM['left_shoulder_pitch_joint'],
+            g1_specs.CONTINUOUS_PAYLOAD_KG,
         )
 
         # PF-4: control-loop realism (A/B via realism_enabled).
@@ -327,6 +335,25 @@ class G1TraversalEnv(gym.Env):
         self._sat_logger.update(torque, velocity)
         self._power_logger.update(torque, velocity, self.model.opt.timestep)
         self._thermal_logger.update(torque)
+        self._stability_logger.update_stability(self._com_xy(), self._support_hull())
+
+    def _com_xy(self):
+        """Ground projection (x, y) of the whole-robot centre of mass (PF-6)."""
+        mass = self.model.body_mass[1:]            # exclude world body
+        xipos = self.data.xipos[1:]
+        com = (mass[:, None] * xipos).sum(axis=0) / mass.sum()
+        return com[:2]
+
+    def _support_hull(self):
+        """Convex hull (xy) of active foot/ground contact points (PF-6)."""
+        pts = []
+        for i in range(self.data.ncon):
+            c = self.data.contact[i]
+            if self._floor_geom_id in (c.geom1, c.geom2):
+                pts.append(c.pos[:2].copy())
+        if not pts:
+            return np.zeros((0, 2))
+        return convex_hull(np.array(pts))
 
     def get_power_report(self):
         """Power/energy section for the current episode (PF-2)."""
@@ -335,6 +362,10 @@ class G1TraversalEnv(gym.Env):
     def get_thermal_report(self):
         """Per-joint thermal duty-cycle section for the episode (PF-3)."""
         return self._thermal_logger.report_named(g1_specs.JOINT_NAMES)
+
+    def get_stability_report(self):
+        """Stability/payload section for the current episode (PF-6)."""
+        return self._stability_logger.report()
 
     def get_saturation_report(self):
         """Per-joint saturation stats for the current episode (PF-1)."""
@@ -379,6 +410,7 @@ class G1TraversalEnv(gym.Env):
         self._sat_logger.reset()
         self._power_logger.reset()
         self._thermal_logger.reset()
+        self._stability_logger.reset()
         self._ctrl_buf.clear()
         self._proprio_buf.clear()
         if seed is not None:
@@ -520,6 +552,7 @@ class G1TraversalEnv(gym.Env):
             self.print_saturation_summary()
             print(self._power_logger.summary_str())
             print(self._thermal_logger.summary_str(g1_specs.JOINT_NAMES))
+            print(self._stability_logger.summary_str())
 
         info = {
             'scores': {

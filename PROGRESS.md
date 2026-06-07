@@ -309,3 +309,21 @@ push-based unless a task explicitly opts into an assumed dexterous hand.
 - Side effect: PF-4 realism A/B gap on the *standing* home policy shrank (158-vs-16
   steps was a no-floor artifact; now both stand 400 steps with a small ~0.07
   return gap). Realism mechanism still verified directly (noisy obs std ~0.05).
+
+### PF-6 — Stability & payload feasibility — COMPLETE
+- `src/backend/physical/stability.py`: pure-numpy `convex_hull` (monotone chain)
+  + `support_margin` (signed distance to polygon, +inside/-outside), and
+  `StabilityLogger`.
+- `g1_env.py`: per physics step computes whole-robot CoM (`_com_xy`, mass-weighted
+  from xipos) and the support polygon (`_support_hull`, convex hull of active
+  floor-contact points), feeding `update_stability`. `get_stability_report()`;
+  reset + verbose print wired.
+- Tipping: flags steps where CoM ground projection leaves the support polygon;
+  reports tipping_violations and min_support_margin_m.
+- Payload: `update_payload(mass, arm_extension)` computes shoulder static moment
+  (mass*g*ext) vs G1 arm peak (25 N·m), flags >60% (dynamics headroom) and mass
+  over CONTINUOUS_PAYLOAD_KG (2-3 kg/arm). Called by carry tasks (PF-8); exercised
+  directly in the test for now.
+- Test (`test_stability.py`): geometry (centre +0.5 / outside -1.0), live standing
+  robot 0 tipping with CoM ~5 cm inside support polygon, payload 2kg@0.30m OK
+  (23.5%) vs 5kg@0.40m infeasible (78.5%, over cap). All PF-1..5 regressions pass.
