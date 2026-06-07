@@ -6,6 +6,8 @@ humanoid, so observation/action dimensions are derived from the loaded model
 rather than hard-coded: this env adapts automatically if the model changes.
 """
 import os
+from collections import deque
+
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -41,6 +43,18 @@ _DEFAULT_GOAL = np.array([5.0, 0.0])   # (x, z) target in world XZ plane
 _OBSTACLE_PENALTY_RADIUS = 0.8   # metres — within this distance, apply penalty
 _NUM_OBSTACLES = 2
 _FALL_HEIGHT_FRACTION = 0.38     # pelvis below this fraction of standing → fallen
+
+# PF-4: control-loop realism. One config block so magnitudes are easy to tune.
+# Sigmas are ASSUMPTIONS (logged in PROGRESS.md) — representative, not measured.
+REALISM_CONFIG = {
+    'policy_hz': 50,                 # policy decision rate (physics is 500 Hz)
+    'actuator_latency_ms': 10.0,     # delay before a command reaches the actuators
+    'obs_latency_ms': 5.0,           # sensing/processing delay on observations
+    'noise_joint_pos': 0.01,         # rad, encoder noise (ASSUMPTION)
+    'noise_joint_vel': 0.05,         # rad/s, encoder-derived vel noise (ASSUMPTION)
+    'noise_lin_vel': 0.05,           # m/s, IMU linear-vel noise (ASSUMPTION)
+    'noise_proj_grav': 0.02,         # unit-vector IMU tilt noise (ASSUMPTION)
+}
 
 
 class _DynamicObstacle:
@@ -78,7 +92,8 @@ class G1TraversalEnv(gym.Env):
 
     metadata = {'render_modes': []}
 
-    def __init__(self, waypoints=None, verbose_physical=False):
+    def __init__(self, waypoints=None, verbose_physical=False,
+                 realism_enabled=False, realism_config=None):
         super().__init__()
         self.model = mujoco.MjModel.from_xml_path(_XML_PATH)
         self.data = mujoco.MjData(self.model)
@@ -99,6 +114,20 @@ class G1TraversalEnv(gym.Env):
         self._thermal_logger = ThermalLogger(
             g1_specs.continuous_torque_array(), self.model.opt.timestep
         )
+
+        # PF-4: control-loop realism (A/B via realism_enabled).
+        self._realism_enabled = bool(realism_enabled)
+        cfg = dict(REALISM_CONFIG)
+        if realism_config:
+            cfg.update(realism_config)
+        self._realism = cfg
+        ts = self.model.opt.timestep
+        self._n_substeps = max(1, int(round((1.0 / cfg['policy_hz']) / ts)))
+        self._act_latency_steps = max(0, int(round(cfg['actuator_latency_ms'] / 1000.0 / ts)))
+        self._obs_latency_steps = max(0, int(round(cfg['obs_latency_ms'] / 1000.0 / ts)))
+        self._ctrl_buf = deque(maxlen=self._act_latency_steps + 1)
+        self._proprio_buf = deque(maxlen=self._obs_latency_steps + 1)
+        self._noise_rng = np.random.default_rng()
 
         # Dimensions derived from the model: nu actuated joints, free base
         # occupies qpos[:7] / qvel[:6].
@@ -154,8 +183,8 @@ class G1TraversalEnv(gym.Env):
             self.model.jnt_actfrcrange[jid] = [-peak, peak]
             self.model.jnt_actfrclimited[jid] = 1
 
-    def _apply_control(self, action):
-        """Map policy action in [-1,1] to clamped joint position targets.
+    def _control_target(self, action):
+        """Map policy action in [-1,1] to a clamped joint position target.
 
         The commanded position is clamped to each actuator's ctrlrange so we
         never command outside the joint's physical range; the resulting torque
@@ -166,7 +195,11 @@ class G1TraversalEnv(gym.Env):
         target = mid + action * half
         lo = self.model.actuator_ctrlrange[:, 0]
         hi = self.model.actuator_ctrlrange[:, 1]
-        self.data.ctrl[:] = np.clip(target, lo, hi)
+        return np.clip(target, lo, hi)
+
+    def _apply_control(self, action):
+        """Set the actuator position targets from a policy action (PF-1)."""
+        self.data.ctrl[:] = self._control_target(action)
 
     def _apply_control_old(self, action):
         """Original near-ideal actuation (kept for reference; PF-1)."""
@@ -238,6 +271,10 @@ class G1TraversalEnv(gym.Env):
         self._sat_logger.reset()
         self._power_logger.reset()
         self._thermal_logger.reset()
+        self._ctrl_buf.clear()
+        self._proprio_buf.clear()
+        if seed is not None:
+            self._noise_rng = np.random.default_rng(seed)
         return self._get_obs(), {}
 
     def preview_step(self):
@@ -294,16 +331,45 @@ class G1TraversalEnv(gym.Env):
     def step(self, action):
         action = np.clip(action, -1.0, 1.0)
 
-        # PF-1: clamped position targets + physics-enforced torque limits.
-        self._apply_control(action)
-
-        mujoco.mj_step(self.model, self.data)
-        self._step_count += 1
-        self._log_physical()
+        # PF-4: realistic path (policy-rate decoupling + actuator latency) vs the
+        # ideal path (one physics step == one policy step). A/B via realism flag.
+        if self._realism_enabled:
+            self._physics_realistic(action)
+        else:
+            self._physics_ideal(action)
 
         for obs in self._obstacles:
             obs.step()
 
+        reward, terminated, truncated, info = self._post_physics(action)
+        return self._observe(), reward, terminated, truncated, info
+
+    def _physics_ideal(self, action):
+        """One physics step per policy step (original behaviour; PF-1)."""
+        self._apply_control(action)
+        mujoco.mj_step(self.model, self.data)
+        self._step_count += 1
+        self._log_physical()
+
+    def _physics_realistic(self, action):
+        """PF-4: decoupled policy rate (zero-order hold) + actuator latency.
+
+        The policy action is held across ``_n_substeps`` physics steps. Each
+        commanded position target enters a buffer and the actuator applies the
+        one delayed by ``_act_latency_steps``. Physical logging runs at physics
+        resolution; the proprio buffer feeds observation latency in _observe().
+        """
+        target = self._control_target(action)
+        for _ in range(self._n_substeps):
+            self._ctrl_buf.append(target)
+            self.data.ctrl[:] = self._ctrl_buf[0]   # oldest == delayed command
+            mujoco.mj_step(self.model, self.data)
+            self._log_physical()
+            self._proprio_buf.append(self._proprio_vector())
+        self._step_count += 1
+
+    def _post_physics(self, action):
+        """Compute reward, termination and info after the physics advance."""
         pelvis_z = self.data.qpos[2]
 
         dist = self._goal_dist()
@@ -360,21 +426,53 @@ class G1TraversalEnv(gym.Env):
             'heading': self._heading(),
             'obstacles': [obs.world_pos() for obs in self._obstacles],
         }
-        return self._get_obs(), float(reward), terminated, truncated, info
+        return float(reward), terminated, truncated, info
 
     # ------------------------------------------------------------------
-    def _get_obs(self):
+    def _proprio_vector(self):
+        """Proprioceptive obs (joint_pos, joint_vel, lin_vel, proj_grav)."""
         qpos = self.data.qpos
         qvel = self.data.qvel
         n = self.n_joints
-
         joint_pos = qpos[7:7 + n].astype(np.float32)
         joint_vel = qvel[6:6 + n].astype(np.float32)
         lin_vel = qvel[0:3].astype(np.float32)
         proj_grav = self._projected_gravity().astype(np.float32)
+        return np.concatenate([joint_pos, joint_vel, lin_vel, proj_grav])
+
+    def _goal_part(self):
+        """Goal obs (goal_vec, goal_dist)."""
         goal_vec = self._goal_vector().astype(np.float32)
         goal_dist = np.array([self._goal_dist()], dtype=np.float32)
-        return np.concatenate([joint_pos, joint_vel, lin_vel, proj_grav, goal_vec, goal_dist])
+        return np.concatenate([goal_vec, goal_dist])
+
+    def _get_obs(self):
+        """Clean, current observation (ideal sensing)."""
+        return np.concatenate([self._proprio_vector(), self._goal_part()])
+
+    def _observe(self):
+        """Observation returned to the policy.
+
+        Ideal path: clean current obs. Realistic path (PF-4): proprio delayed by
+        ``_obs_latency_steps`` physics steps plus Gaussian sensor noise; goal is
+        not delayed/noised (it is a commanded target, not a sensor reading).
+        """
+        if not self._realism_enabled:
+            return self._get_obs()
+        delayed = self._proprio_buf[0] if self._proprio_buf else self._proprio_vector()
+        return np.concatenate([self._add_obs_noise(delayed), self._goal_part()])
+
+    def _add_obs_noise(self, proprio):
+        """Add Gaussian sensor noise to a proprio vector (PF-4, ASSUMPTION sigmas)."""
+        n = self.n_joints
+        cfg = self._realism
+        rng = self._noise_rng
+        out = np.array(proprio, dtype=np.float32)
+        out[:n] += rng.normal(0.0, cfg['noise_joint_pos'], n)
+        out[n:2 * n] += rng.normal(0.0, cfg['noise_joint_vel'], n)
+        out[2 * n:2 * n + 3] += rng.normal(0.0, cfg['noise_lin_vel'], 3)
+        out[2 * n + 3:2 * n + 6] += rng.normal(0.0, cfg['noise_proj_grav'], 3)
+        return out
 
     def _projected_gravity(self):
         """Gravity vector (0,0,-1) rotated into pelvis body frame."""

@@ -267,3 +267,24 @@ push-based unless a task explicitly opts into an assumed dexterous hand.
   absolute thermal prediction.
 - Test: random policy flags 29/29 joints (RMS ~285.7% = 1/0.35 of continuous, as
   expected when peak torque is sustained). pct/duration non-negative, risk bool.
+
+### PF-4 — Control-loop realism — COMPLETE
+- `g1_env.py` gains an A/B realism path behind `realism_enabled` (+ `REALISM_CONFIG`
+  block; all sigmas/latencies in one place). Ideal path untouched
+  (`_physics_ideal`): one physics step per policy step, preserving the trained
+  baseline and the A/B reference.
+- Realistic path (`_physics_realistic`): policy rate decoupled from physics —
+  POLICY_HZ=50 over 500 Hz physics = 10 substeps with zero-order hold; actuator
+  latency 10 ms = 5-step ctrl buffer (apply oldest); obs latency 5 ms = 2-step
+  proprio buffer; Gaussian sensor noise on joint pos/vel + IMU lin-vel + proj
+  gravity. Goal vector is NOT noised/delayed (commanded target, not a sensor).
+- Refactor: `step()` is now a dispatcher; reward/info extracted to
+  `_post_physics`; obs split into `_proprio_vector` + `_goal_part`; `_observe`
+  returns clean (ideal) or noisy+delayed (realistic). `reset` clears buffers and
+  seeds the noise RNG from `seed` for reproducible A/B.
+- **ASSUMPTIONS**: noise sigmas (joint_pos 0.01 rad, joint_vel 0.05 rad/s,
+  lin_vel 0.05 m/s, proj_grav 0.02) and latencies — representative, not measured.
+- Test (`test_realism.py`): same deterministic standing policy + seed survives
+  158 steps ideal vs 16 steps with realism on (return 44.8 -> 4.2). That gap IS
+  the sim-to-real risk. Ideal obs deterministic, realistic obs noisy (std ~0.05).
+  Regression: test_env / test_saturation / server import all still pass.
