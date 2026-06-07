@@ -1,0 +1,52 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - generic: Click to place waypoint · Drag to orbit · Scroll to zoom
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - heading "Checkpoint" [level=3] [ref=e7]
+        - combobox [ref=e8] [cursor=pointer]:
+          - option "v1 — early (10k steps)"
+          - option "v2 — mid (30k steps)"
+          - option "v3 — best (60k steps)" [selected]
+        - generic [ref=e9]:
+          - button "Auto" [ref=e10] [cursor=pointer]
+          - button "Watch" [ref=e11] [cursor=pointer]
+        - button "New Episode" [ref=e12] [cursor=pointer]
+      - generic [ref=e13]:
+        - heading "Live Scores" [level=3] [ref=e14]
+        - generic [ref=e15]:
+          - generic [ref=e16]: "--"
+          - generic [ref=e17]: "?"
+          - generic [ref=e18]: total
+        - generic [ref=e20]:
+          - generic [ref=e21]: Waypoint Efficiency
+          - generic [ref=e22]: "--"
+        - generic [ref=e25]:
+          - generic [ref=e26]: Gait Stability
+          - generic [ref=e27]: "--"
+        - generic [ref=e30]:
+          - generic [ref=e31]: Obstacle Clearance
+          - generic [ref=e32]: "--"
+        - generic [ref=e35]:
+          - generic [ref=e36]: Energy
+          - generic [ref=e37]: "--"
+        - generic [ref=e40]:
+          - generic [ref=e41]: Completion
+          - generic [ref=e42]: "--"
+      - generic [ref=e45]:
+        - heading "Waypoints" [level=3] [ref=e46]
+        - list [ref=e47]:
+          - listitem [ref=e48]:
+            - generic [ref=e49]: "#1 (5.0, 0.0)"
+            - generic [ref=e50] [cursor=pointer]: ✕
+        - button "Clear Waypoints" [ref=e51] [cursor=pointer]
+        - generic [ref=e52]: Click viewport to add · 3D scene places on floor plane
+      - heading "Training Progress" [level=3] [ref=e54]
+      - generic [ref=e56]:
+        - heading "About This Robot" [level=3] [ref=e57]
+        - paragraph [ref=e58]:
+          - text: Unitree H1 — 1.8 m, 47 kg, 19 DOF commercial humanoid.
+          - text: "Physics: MuJoCo rigid-body simulation drives accurate joint dynamics."
+          - text: "Policy: PPO (proximal policy optimisation) trained overnight on a 47-dim observation space — the robot learns to walk to waypoints without falling."
+  - generic [ref=e61]: Disconnected

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Capture Mode — Fordham Lincoln Center Splat</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0f; --panel: #12121a; --border: #1e1e2e;
+      --teal: #00e5cc; --blue: #4488ff; --text: #d0d0e0; --muted: #666680;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter','Segoe UI',system-ui,sans-serif; font-size: 14px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; }
+    header { width: 100%; max-width: 800px; margin-bottom: 32px; }
+    h1 { font-size: 22px; font-weight: 700; color: var(--teal); margin-bottom: 4px; }
+    .subtitle { color: var(--muted); font-size: 13px; }
+    .back { display: inline-block; color: var(--blue); text-decoration: none; font-size: 12px; margin-bottom: 16px; }
+    .back:hover { color: var(--teal); }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 24px; margin-bottom: 16px; width: 100%; max-width: 800px; }
+    .card h2 { font-size: 12px; font-weight: 600; letter-spacing: 1.4px; text-transform: uppercase; color: var(--teal); margin-bottom: 14px; }
+    .step-list { list-style: none; counter-reset: steps; }
+    .step-list li { counter-increment: steps; display: flex; gap: 14px; margin-bottom: 12px; align-items: flex-start; }
+    .step-list li::before { content: counter(steps); background: var(--teal); color: #000; font-weight: 700; font-size: 11px; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+    .step-list li p { color: var(--text); line-height: 1.6; }
+    .step-list li p b { color: var(--teal); }
+    .tip { background: rgba(0,229,204,0.06); border: 1px solid rgba(0,229,204,0.2); border-radius: 6px; padding: 10px 14px; margin-top: 10px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+    .tip b { color: var(--text); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+    table td { padding: 8px 10px; border-bottom: 1px solid rgba(30,30,46,0.6); color: var(--text); }
+    table td:first-child { color: var(--teal); font-weight: 600; }
+    .badge { display: inline-block; background: rgba(68,136,255,0.15); color: var(--blue); border: 1px solid rgba(68,136,255,0.3); border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+    .go-btn { display: block; background: var(--teal); color: #000; font-weight: 700; font-size: 14px; text-decoration: none; text-align: center; padding: 12px 0; border-radius: 6px; margin-top: 20px; width: 100%; max-width: 800px; }
+    .go-btn:hover { opacity: 0.88; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/" class="back">← Back to Traversal Trainer</a>
+    <h1>Capture Mode — Gaussian Splat Instructions</h1>
+    <div class="subtitle">Follow these steps to film Fordham Lincoln Center for tomorrow's live splat integration.</div>
+  </header>
+
+  <div class="card">
+    <h2>What to Capture</h2>
+    <ul class="step-list">
+      <li><p>Film the <b>main ground-floor lobby and plaza</b> of Fordham Lincoln Center — the spaces the robot will traverse. Aim for a ~20×20 m capture zone.</p></li>
+      <li><p>Walk in <b>slow, overlapping arcs</b>. Never walk backwards. Keep the phone held at chest height and pointed slightly downward (15–20°). Speed: about 0.3 m/s (very slow).</p></li>
+      <li><p>Cover the scene from <b>three distinct heights</b>: ground-level (0.5 m), chest-level (1.2 m), and overhead (2 m, phone raised). 2–3 loops at each height.</p></li>
+      <li><p>Avoid <b>fast pans, motion blur, or direct sunlight reflections</b> on glass. Shoot in overcast light or interior lighting — consistent exposure is key.</p></li>
+      <li><p>Capture <b>close-up detail passes</b> for any furniture, pillars, or landmarks the robot will navigate around — 1 m distance, slow 360° orbit.</p></li>
+    </ul>
+    <div class="tip"><b>Minimum frames:</b> 300–500 photos for a room-scale capture. Postshot will auto-extract from video — film at least 4 minutes of continuous footage.</div>
+  </div>
+
+  <div class="card">
+    <h2>PostShot Settings</h2>
+    <table>
+      <tr><th>Setting</th><th>Value</th><th>Why</th></tr>
+      <tr><td>Scene Scale</td><td>1.0 (metric)</td><td>Matches MuJoCo coordinate scale</td></tr>
+      <tr><td>Quality</td><td>High / 30k Gaussians</td><td>Balance of detail vs. loading time</td></tr>
+      <tr><td>Export Format</td><td>.splat (compressed)</td><td>Required by @mkkellogg/gaussian-splats-3d</td></tr>
+      <tr><td>Background</td><td>Black / transparent</td><td>Blends with dark UI theme</td></tr>
+      <tr><td>Up Axis</td><td>+Y</td><td>Matches Three.js and MuJoCo convention</td></tr>
+      <tr><td>Iterations</td><td>15,000 min</td><td>Enough for room-scale clarity</td></tr>
+    </table>
+    <div class="tip"><b>Output file:</b> save as <code>scene.splat</code> and drop it into <code>assets/</code>. The server serves it at <code>/assets/scene.splat</code> and the viewer loads it automatically on next refresh.</div>
+  </div>
+
+  <div class="card">
+    <h2>Luma AI (Free Tier Alternative)</h2>
+    <ul class="step-list">
+      <li><p>Upload video to <b>lumalabs.ai</b> — free tier supports up to 5 min video.</p></li>
+      <li><p>Once processed, download the <b>Gaussian Splat (.ply)</b> from the export menu.</p></li>
+      <li><p>Convert: <code>python scripts/ply_to_splat.py scene.ply assets/scene.splat</code> (uses the <code>gsplat</code> library).</p></li>
+    </ul>
+    <div class="tip"><b>Quality note:</b> Luma free tier limits resolution. PostShot with a local GPU gives noticeably sharper results for architectural interiors.</div>
+  </div>
+
+  <div class="card">
+    <h2>Integration Checklist</h2>
+    <ul class="step-list">
+      <li><p>Drop <code>scene.splat</code> into <code>assets/</code></p></li>
+      <li><p>Restart server: <code>python -m uvicorn src.backend.server:app --port 8765</code></p></li>
+      <li><p>Refresh <a href="/" style="color:var(--teal)">the trainer</a> — the splat loads automatically with a progress overlay</p></li>
+      <li><p>If splat coordinate system is misaligned, adjust the <b>Y-axis offset</b> in <code>viewer.js</code> → <code>tryLoadSplat()</code></p></li>
+    </ul>
+  </div>
+
+  <a href="/" class="go-btn">Open Traversal Trainer →</a>
+</body>
+</html>

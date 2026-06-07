@@ -1,0 +1,102 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "← Back to Traversal Trainer" [ref=e3] [cursor=pointer]:
+      - /url: /
+    - heading "Capture Mode — Gaussian Splat Instructions" [level=1] [ref=e4]
+    - generic [ref=e5]: Follow these steps to film Fordham Lincoln Center for tomorrow's live splat integration.
+  - generic [ref=e6]:
+    - heading "What to Capture" [level=2] [ref=e7]
+    - list [ref=e8]:
+      - listitem [ref=e9]:
+        - paragraph [ref=e10]: Film the main ground-floor lobby and plaza of Fordham Lincoln Center — the spaces the robot will traverse. Aim for a ~20×20 m capture zone.
+      - listitem [ref=e11]:
+        - paragraph [ref=e12]: "Walk in slow, overlapping arcs. Never walk backwards. Keep the phone held at chest height and pointed slightly downward (15–20°). Speed: about 0.3 m/s (very slow)."
+      - listitem [ref=e13]:
+        - paragraph [ref=e14]: "Cover the scene from three distinct heights: ground-level (0.5 m), chest-level (1.2 m), and overhead (2 m, phone raised). 2–3 loops at each height."
+      - listitem [ref=e15]:
+        - paragraph [ref=e16]: Avoid fast pans, motion blur, or direct sunlight reflections on glass. Shoot in overcast light or interior lighting — consistent exposure is key.
+      - listitem [ref=e17]:
+        - paragraph [ref=e18]: Capture close-up detail passes for any furniture, pillars, or landmarks the robot will navigate around — 1 m distance, slow 360° orbit.
+    - generic [ref=e19]: "Minimum frames: 300–500 photos for a room-scale capture. Postshot will auto-extract from video — film at least 4 minutes of continuous footage."
+  - generic [ref=e20]:
+    - heading "PostShot Settings" [level=2] [ref=e21]
+    - table [ref=e22]:
+      - rowgroup [ref=e23]:
+        - row "Setting Value Why" [ref=e24]:
+          - columnheader "Setting" [ref=e25]
+          - columnheader "Value" [ref=e26]
+          - columnheader "Why" [ref=e27]
+        - row "Scene Scale 1.0 (metric) Matches MuJoCo coordinate scale" [ref=e28]:
+          - cell "Scene Scale" [ref=e29]
+          - cell "1.0 (metric)" [ref=e30]
+          - cell "Matches MuJoCo coordinate scale" [ref=e31]
+        - row "Quality High / 30k Gaussians Balance of detail vs. loading time" [ref=e32]:
+          - cell "Quality" [ref=e33]
+          - cell "High / 30k Gaussians" [ref=e34]
+          - cell "Balance of detail vs. loading time" [ref=e35]
+        - row "Export Format .splat (compressed) Required by @mkkellogg/gaussian-splats-3d" [ref=e36]:
+          - cell "Export Format" [ref=e37]
+          - cell ".splat (compressed)" [ref=e38]
+          - cell "Required by @mkkellogg/gaussian-splats-3d" [ref=e39]
+        - row "Background Black / transparent Blends with dark UI theme" [ref=e40]:
+          - cell "Background" [ref=e41]
+          - cell "Black / transparent" [ref=e42]
+          - cell "Blends with dark UI theme" [ref=e43]
+        - row "Up Axis +Y Matches Three.js and MuJoCo convention" [ref=e44]:
+          - cell "Up Axis" [ref=e45]
+          - cell "+Y" [ref=e46]
+          - cell "Matches Three.js and MuJoCo convention" [ref=e47]
+        - row "Iterations 15,000 min Enough for room-scale clarity" [ref=e48]:
+          - cell "Iterations" [ref=e49]
+          - cell "15,000 min" [ref=e50]
+          - cell "Enough for room-scale clarity" [ref=e51]
+    - generic [ref=e52]:
+      - text: "Output file: save as"
+      - code [ref=e53]: scene.splat
+      - text: and drop it into
+      - code [ref=e54]: assets/
+      - text: . The server serves it at
+      - code [ref=e55]: /assets/scene.splat
+      - text: and the viewer loads it automatically on next refresh.
+  - generic [ref=e56]:
+    - heading "Luma AI (Free Tier Alternative)" [level=2] [ref=e57]
+    - list [ref=e58]:
+      - listitem [ref=e59]:
+        - paragraph [ref=e60]: Upload video to lumalabs.ai — free tier supports up to 5 min video.
+      - listitem [ref=e61]:
+        - paragraph [ref=e62]: Once processed, download the Gaussian Splat (.ply) from the export menu.
+      - listitem [ref=e63]:
+        - paragraph [ref=e64]:
+          - text: "Convert:"
+          - code [ref=e65]: python scripts/ply_to_splat.py scene.ply assets/scene.splat
+          - text: (uses the
+          - code [ref=e66]: gsplat
+          - text: library).
+    - generic [ref=e67]: "Quality note: Luma free tier limits resolution. PostShot with a local GPU gives noticeably sharper results for architectural interiors."
+  - generic [ref=e68]:
+    - heading "Integration Checklist" [level=2] [ref=e69]
+    - list [ref=e70]:
+      - listitem [ref=e71]:
+        - paragraph [ref=e72]:
+          - text: Drop
+          - code [ref=e73]: scene.splat
+          - text: into
+          - code [ref=e74]: assets/
+      - listitem [ref=e75]:
+        - paragraph [ref=e76]:
+          - text: "Restart server:"
+          - code [ref=e77]: python -m uvicorn src.backend.server:app --port 8765
+      - listitem [ref=e78]:
+        - paragraph [ref=e79]:
+          - text: Refresh
+          - link "the trainer" [ref=e80] [cursor=pointer]:
+            - /url: /
+          - text: — the splat loads automatically with a progress overlay
+      - listitem [ref=e81]:
+        - paragraph [ref=e82]:
+          - text: If splat coordinate system is misaligned, adjust the Y-axis offset in
+          - code [ref=e83]: viewer.js
+          - text: →
+          - code [ref=e84]: tryLoadSplat()
+  - link "Open Traversal Trainer →" [ref=e85] [cursor=pointer]:
+    - /url: /

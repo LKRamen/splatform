@@ -1,0 +1,6 @@
+[     562ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8765/favicon.ico:0
+[   39674ms] [WARNING] WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost @ http://localhost:8765/:0
+[   39696ms] [LOG] THREE.WebGLRenderer: Context Lost. @ https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js:28856
+[   40742ms] [LOG] THREE.WebGLRenderer: Context Restored. @ https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js:28864
+[   70654ms] [WARNING] WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost @ http://localhost:8765/:0
+[   70672ms] [LOG] THREE.WebGLRenderer: Context Lost. @ https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js:28856

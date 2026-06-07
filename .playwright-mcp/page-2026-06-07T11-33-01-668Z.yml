@@ -1,0 +1,20 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - heading "Policy Comparison — v1 (Early) vs v3 (Best)" [level=1] [ref=e3]
+    - link "← Main Trainer" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "Capture Mode →" [ref=e5] [cursor=pointer]:
+      - /url: /capture
+  - generic [ref=e6]:
+    - generic [ref=e7]:
+      - generic: v1 — Early Policy (10k steps)
+    - generic [ref=e9]:
+      - generic: v3 — Best Policy (60k steps)
+  - generic [ref=e11]:
+    - generic [ref=e14]: "v1: connecting…"
+    - generic [ref=e17]: "v3: connecting…"
+    - generic [ref=e18]:
+      - text: "Score — v1:"
+      - generic [ref=e19]: "--"
+      - text: "v3:"
+      - generic [ref=e20]: "--"

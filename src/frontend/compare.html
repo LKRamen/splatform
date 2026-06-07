@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Policy Comparison — v1 vs v3</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg: #0a0a0f; --panel: #12121a; --border: #1e1e2e; --teal: #00e5cc; --blue: #4488ff; --text: #d0d0e0; --muted: #666680; }
+    html, body { width: 100%; height: 100%; background: var(--bg); color: var(--text); font-family: 'Inter','Segoe UI',system-ui,sans-serif; overflow: hidden; }
+    #topbar { height: 40px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 16px; }
+    #topbar h1 { font-size: 13px; font-weight: 600; color: var(--teal); }
+    #topbar a { color: var(--blue); font-size: 11px; text-decoration: none; }
+    #topbar a:hover { color: var(--teal); }
+    #viewports { display: flex; width: 100%; height: calc(100% - 40px - 28px); }
+    .pane { flex: 1; position: relative; }
+    .pane + .pane { border-left: 2px solid var(--border); }
+    .pane canvas { display: block; width: 100% !important; height: 100% !important; }
+    .pane-label { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(10,10,15,0.85); border: 1px solid var(--border); border-radius: 20px; padding: 4px 14px; font-size: 12px; font-weight: 600; pointer-events: none; white-space: nowrap; }
+    .pane-label.v1 { color: #ff8844; border-color: rgba(255,136,68,0.3); }
+    .pane-label.v3 { color: var(--teal); border-color: rgba(0,229,204,0.3); }
+    #statusbar { height: 28px; background: #0d0d15; border-top: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 24px; font-size: 11px; color: var(--muted); }
+    .stat { display: flex; gap: 6px; align-items: center; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: #ff4466; }
+    .dot.connected { background: var(--teal); }
+    .score-badge { font-size: 11px; font-weight: 700; }
+    .score-badge.v1 { color: #ff8844; }
+    .score-badge.v3 { color: var(--teal); }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <h1>Policy Comparison — v1 (Early) vs v3 (Best)</h1>
+    <a href="/">← Main Trainer</a>
+    <a href="/capture">Capture Mode →</a>
+  </div>
+  <div id="viewports">
+    <div class="pane" id="pane-v1">
+      <div class="pane-label v1">v1 — Early Policy (10k steps)</div>
+    </div>
+    <div class="pane" id="pane-v3">
+      <div class="pane-label v3">v3 — Best Policy (60k steps)</div>
+    </div>
+  </div>
+  <div id="statusbar">
+    <div class="stat">
+      <div class="dot" id="dot-v1"></div>
+      <span id="txt-v1">v1: connecting…</span>
+    </div>
+    <div class="stat">
+      <div class="dot" id="dot-v3"></div>
+      <span id="txt-v3">v3: connecting…</span>
+    </div>
+    <div class="stat" style="margin-left:auto;">
+      Score — v1: <span class="score-badge v1" id="score-v1">--</span>
+      &nbsp;&nbsp;v3: <span class="score-badge v3" id="score-v3">--</span>
+    </div>
+    <div id="fps-stat" style="margin-left:8px;"></div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const JOINT_NAMES = [
+      'left_hip_yaw','left_hip_roll','left_hip_pitch','left_knee','left_ankle',
+      'right_hip_yaw','right_hip_roll','right_hip_pitch','right_knee','right_ankle',
+      'torso',
+      'left_shoulder_pitch','left_shoulder_roll','left_shoulder_yaw','left_elbow',
+      'right_shoulder_pitch','right_shoulder_roll','right_shoulder_yaw','right_elbow',
+    ];
+
+    function buildScene(paneEl, version) {
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.shadowMap.enabled = true;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      paneEl.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x050508);
+      scene.fog = new THREE.Fog(0x050508, 30, 80);
+
+      const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+      camera.position.set(0, 5, 8);
+
+      const orbitCtl = new OrbitControls(camera, renderer.domElement);
+      orbitCtl.enableDamping = true;
+      orbitCtl.dampingFactor = 0.08;
+      orbitCtl.maxPolarAngle = Math.PI / 2 - 0.02;
+
+      // Lighting
+      scene.add(new THREE.AmbientLight(0x334466, 1.5));
+      const sun = new THREE.DirectionalLight(0xffffff, 2);
+      sun.position.set(10, 20, 10);
+      sun.castShadow = true;
+      scene.add(sun);
+
+      // Floor + grid
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(60, 60),
+        new THREE.MeshLambertMaterial({ color: 0x1a1a2e })
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+      scene.add(new THREE.GridHelper(60, 60, 0x223344, 0x1a2233));
+
+      // Buildings
+      const bMat = new THREE.MeshLambertMaterial({ color: 0x1e2040 });
+      [[8,12,3,20,8],[-8,10,-5,18,6],[15,8,10,16,5],[-15,14,8,22,10]].forEach(([x,h,z,d,w]) => {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), bMat);
+        m.position.set(x, h/2, z);
+        scene.add(m);
+      });
+
+      // Robot group
+      const robotGroup = new THREE.Group();
+      scene.add(robotGroup);
+      const jointBones = {};
+
+      // Color differs per version for quick visual distinction
+      const robotColor = version === 'v1' ? 0xff8844 : 0x00e5cc;
+
+      function buildPlaceholder() {
+        const mat = new THREE.MeshLambertMaterial({ color: robotColor });
+        const parts = [
+          new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.6, 4, 8), mat),
+          new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), mat),
+        ];
+        parts[0].position.set(0, 1.0, 0);
+        parts[1].position.set(0, 1.55, 0);
+        for (const sx of [-1, 1]) {
+          const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.4, 4, 8), mat);
+          arm.position.set(sx * 0.3, 0.9, 0);
+          robotGroup.add(arm);
+          const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.5, 4, 8), mat);
+          leg.position.set(sx * 0.12, 0.45, 0);
+          robotGroup.add(leg);
+        }
+        robotGroup.add(...parts);
+      }
+
+      const glbLoader = new GLTFLoader();
+      glbLoader.load(
+        '/assets/h1.glb',
+        (gltf) => {
+          // Tint the GLB mesh to distinguish versions
+          gltf.scene.traverse((obj) => {
+            if (obj.isMesh) {
+              obj.material = obj.material.clone();
+              obj.material.color = new THREE.Color(robotColor);
+              obj.material.emissive = new THREE.Color(robotColor).multiplyScalar(0.1);
+            }
+            if (obj.isBone || obj.isSkinnedMesh) {
+              const name = obj.name.toLowerCase().replace(/_link$/, '');
+              if (JOINT_NAMES.includes(name)) jointBones[name] = obj;
+            }
+          });
+          robotGroup.add(gltf.scene);
+        },
+        undefined,
+        () => buildPlaceholder()
+      );
+
+      // Waypoint marker
+      const wpGeo = new THREE.CylinderGeometry(0.15, 0.15, 1.2, 12);
+      const wpMat = new THREE.MeshBasicMaterial({ color: robotColor, transparent: true, opacity: 0.7 });
+      const wpMarker = new THREE.Mesh(wpGeo, wpMat);
+      wpMarker.position.set(5, 0.6, 0);
+      scene.add(wpMarker);
+
+      // Resize
+      function resize() {
+        const w = paneEl.clientWidth, h = paneEl.clientHeight;
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+      new ResizeObserver(resize).observe(paneEl);
+      resize();
+
+      // Render loop
+      function animate() {
+        requestAnimationFrame(animate);
+        orbitCtl.update();
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      return { robotGroup, jointBones, camera, orbitCtl };
+    }
+
+    // Build both panes
+    const paneV1 = document.getElementById('pane-v1');
+    const paneV3 = document.getElementById('pane-v3');
+    const v1 = buildScene(paneV1, 'v1');
+    const v3 = buildScene(paneV3, 'v3');
+
+    const dotV1 = document.getElementById('dot-v1');
+    const dotV3 = document.getElementById('dot-v3');
+    const txtV1 = document.getElementById('txt-v1');
+    const txtV3 = document.getElementById('txt-v3');
+    const scoreV1 = document.getElementById('score-v1');
+    const scoreV3 = document.getElementById('score-v3');
+    const fpsStat = document.getElementById('fps-stat');
+
+    let lastFrame = performance.now();
+
+    function connectPane(version, paneData, dotEl, txtEl, scoreEl) {
+      const ws = new WebSocket(`ws://localhost:8765/simulate/${version}`);
+      ws.onopen = () => {
+        dotEl.classList.add('connected');
+        txtEl.textContent = `${version}: connected`;
+      };
+      ws.onclose = () => {
+        dotEl.classList.remove('connected');
+        txtEl.textContent = `${version}: disconnected`;
+        // Reconnect after 2s
+        setTimeout(() => connectPane(version, paneData, dotEl, txtEl, scoreEl), 2000);
+      };
+      ws.onerror = () => { txtEl.textContent = `${version}: error`; };
+      ws.onmessage = (ev) => {
+        const frame = JSON.parse(ev.data);
+        const { robotGroup, jointBones, camera, orbitCtl } = paneData;
+
+        // Update robot
+        const [px, py, pz] = frame.position;
+        robotGroup.position.set(px, py, pz);
+        robotGroup.rotation.y = frame.heading;
+
+        // Joint angles
+        frame.joints.forEach((angle, i) => {
+          const bone = jointBones[JOINT_NAMES[i]];
+          if (bone) bone.rotation.x = angle;
+        });
+
+        // Camera follow
+        const behind = new THREE.Vector3(
+          px - Math.sin(frame.heading) * 6,
+          py + 3,
+          pz - Math.cos(frame.heading) * 6
+        );
+        camera.position.lerp(behind, 0.04);
+        orbitCtl.target.lerp(new THREE.Vector3(px, py + 1, pz), 0.08);
+
+        // Score display
+        const total = frame.scores?.total ?? 0;
+        const pct = Math.max(0, Math.min(100, ((total + 1) / 2) * 100));
+        scoreEl.textContent = `${pct.toFixed(0)}`;
+
+        // FPS (only from v3 to avoid double-counting)
+        if (version === 'v3') {
+          const now = performance.now();
+          const fps = 1000 / (now - lastFrame);
+          lastFrame = now;
+          fpsStat.textContent = `${fps.toFixed(0)} fps`;
+        }
+      };
+    }
+
+    connectPane('v1', v1, dotV1, txtV1, scoreV1);
+    connectPane('v3', v3, dotV3, txtV3, scoreV3);
+  </script>
+</body>
+</html>

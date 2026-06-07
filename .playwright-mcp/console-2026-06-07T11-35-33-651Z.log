@@ -1,0 +1,3 @@
+[   40601ms] [WARNING] WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost @ http://localhost:8765/:0
+[   40610ms] [LOG] THREE.WebGLRenderer: Context Lost. @ https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js:28856
+[   41675ms] [LOG] THREE.WebGLRenderer: Context Restored. @ https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js:28864
