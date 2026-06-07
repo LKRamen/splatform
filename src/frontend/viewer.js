@@ -206,6 +206,47 @@ function setSceneIndicator(isSplat) {
 // Default to procedural until/unless a splat successfully loads.
 setSceneIndicator(false);
 
+// ------------------------------------------------------------------
+// Splat alignment. Reconstructions rarely arrive in Three.js's Y-up frame,
+// so the loaded cloud usually needs a rotation/scale/offset to line up with
+// the robot and floor. These are the knobs to tune against the real capture.
+//
+// Live-tune from the browser console, e.g.:
+//   splatTransform.setRotation(-90, 0, 0)   // XYZ Euler degrees
+//   splatTransform.setScale(1.5)
+//   splatTransform.setPosition(0, -1.2, 0)
+//   splatTransform.get()                    // read current values to bake in
+// Once it lines up, copy splatTransform.get() back into SPLAT_ALIGNMENT below.
+// ------------------------------------------------------------------
+const SPLAT_ALIGNMENT = {
+  position: [0, 0, 0],
+  rotationDeg: [0, 0, 0], // XYZ Euler degrees
+  scale: 1,
+};
+
+let _splatGroup = null;
+
+function applySplatTransform() {
+  if (!_splatGroup) return;
+  const a = SPLAT_ALIGNMENT;
+  _splatGroup.position.set(a.position[0], a.position[1], a.position[2]);
+  _splatGroup.quaternion.setFromEuler(new THREE.Euler(
+    THREE.MathUtils.degToRad(a.rotationDeg[0]),
+    THREE.MathUtils.degToRad(a.rotationDeg[1]),
+    THREE.MathUtils.degToRad(a.rotationDeg[2]),
+    'XYZ',
+  ));
+  _splatGroup.scale.setScalar(a.scale);
+}
+
+// Expose live tuning hooks for configuring alignment against the real splat.
+window.splatTransform = {
+  setRotation(x, y, z) { SPLAT_ALIGNMENT.rotationDeg = [x, y, z]; applySplatTransform(); },
+  setPosition(x, y, z) { SPLAT_ALIGNMENT.position = [x, y, z]; applySplatTransform(); },
+  setScale(s) { SPLAT_ALIGNMENT.scale = s; applySplatTransform(); },
+  get() { return JSON.parse(JSON.stringify(SPLAT_ALIGNMENT)); },
+};
+
 async function tryLoadSplat() {
   try {
     // Skip the (heavy) library import entirely if the file isn't present.
@@ -230,10 +271,12 @@ async function tryLoadSplat() {
     });
 
     scene.add(dropIn);
+    _splatGroup = dropIn;
+    applySplatTransform(); // align the cloud to the robot/floor frame
     if (lobbyGroup) lobbyGroup.visible = false; // splat replaces the lobby
     splatOverlay.classList.add('hidden');
     setSceneIndicator(true);
-    console.log('Splat loaded successfully');
+    console.log('Splat loaded successfully — tune alignment via splatTransform.setRotation/Position/Scale');
   } catch {
     splatOverlay.classList.add('hidden');
     if (lobbyGroup) lobbyGroup.visible = true;
@@ -250,14 +293,15 @@ tryLoadSplat();
 let robotGroup = new THREE.Group();
 scene.add(robotGroup);
 
-// Joint order is locked by CLAUDE.md (matches MuJoCo Menagerie H1 actuators).
+// Joint order matches the MuJoCo Menagerie Unitree G1 actuators (29 DOF).
 const JOINT_NAMES = [
-  'left_hip_yaw', 'left_hip_roll', 'left_hip_pitch', 'left_knee', 'left_ankle',
-  'right_hip_yaw', 'right_hip_roll', 'right_hip_pitch', 'right_knee', 'right_ankle',
-  'torso',
-  'left_shoulder_pitch', 'left_shoulder_roll', 'left_elbow',
-  'right_shoulder_pitch', 'right_shoulder_roll', 'right_elbow',
-  'left_wrist_roll', 'right_wrist_roll',
+  'left_hip_pitch', 'left_hip_roll', 'left_hip_yaw', 'left_knee', 'left_ankle_pitch', 'left_ankle_roll',
+  'right_hip_pitch', 'right_hip_roll', 'right_hip_yaw', 'right_knee', 'right_ankle_pitch', 'right_ankle_roll',
+  'waist_yaw', 'waist_roll', 'waist_pitch',
+  'left_shoulder_pitch', 'left_shoulder_roll', 'left_shoulder_yaw', 'left_elbow',
+  'left_wrist_roll', 'left_wrist_pitch', 'left_wrist_yaw',
+  'right_shoulder_pitch', 'right_shoulder_roll', 'right_shoulder_yaw', 'right_elbow',
+  'right_wrist_roll', 'right_wrist_pitch', 'right_wrist_yaw',
 ];
 
 // Joint bone map (populated only when a skinned GLB loads).
@@ -268,50 +312,111 @@ const jointBones = {};
 let applyJoints = () => {};
 
 // ------------------------------------------------------------------
-// Procedural H1 rig (1.8 m, 47 kg proportions)
+// Procedural Berkeley Humanoid Lite rig (~0.9 m, ~16 kg proportions).
+//
+// Visual target: the open-source Berkeley Humanoid Lite — a small 3D-printed
+// humanoid built from light/white printed shells with dark structural joint
+// housings, exposed cylindrical actuator "pucks" at the hips/shoulders/
+// knees/elbows, blocky modular limb segments, flat chest/pelvis panels, and a
+// compact rectangular sensor head.
 // ------------------------------------------------------------------
-const ROBOT_TEAL = 0x00e5cc;
+// Retained name (was the old teal tint) so nothing outside this block breaks;
+// the rig is now a printed-white shell with dark joints, not teal.
+const ROBOT_TEAL = 0xeef0f2;        // off-white 3D-printed shell
+const ROBOT_JOINT_DARK = 0x1b1d22;  // dark actuator housings / joint pucks
+const ROBOT_ACCENT = 0x00e5cc;      // small teal accent (status LED feel)
 
 /**
- * Create a named pivot Object3D with a primitive mesh child offset so the
- * limb extends away from the pivot point.
+ * Shared materials for the printed humanoid. Built once and reused across all
+ * segments so the rig stays a coherent white-shell / dark-joint scheme.
+ * @returns {{ shell: THREE.Material, joint: THREE.Material, accent: THREE.Material }}
+ */
+function robotMaterials() {
+  return {
+    shell: new THREE.MeshStandardMaterial({
+      color: ROBOT_TEAL, metalness: 0.05, roughness: 0.6,
+    }),
+    joint: new THREE.MeshStandardMaterial({
+      color: ROBOT_JOINT_DARK, metalness: 0.55, roughness: 0.35,
+    }),
+    accent: new THREE.MeshStandardMaterial({
+      color: ROBOT_ACCENT, emissive: ROBOT_ACCENT, emissiveIntensity: 0.6,
+      metalness: 0.2, roughness: 0.4,
+    }),
+  };
+}
+
+/**
+ * A dark cylindrical actuator "puck" — the exposed joint housing seen at the
+ * hips, shoulders, knees, and elbows of the Berkeley Humanoid Lite. Oriented
+ * with its axis along a chosen world-ish axis ('x', 'y', or 'z').
+ * @param {number} radius
+ * @param {number} length
+ * @param {THREE.Material} jointMat
+ * @param {'x'|'y'|'z'} axis cylinder axis (default 'x', sideways)
+ * @returns {THREE.Mesh}
+ */
+function makeJointPuck(radius, length, jointMat, axis = 'x') {
+  const puck = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, length, 16), jointMat);
+  if (axis === 'x') puck.rotation.z = Math.PI / 2;
+  else if (axis === 'z') puck.rotation.x = Math.PI / 2;
+  puck.castShadow = true;
+  return puck;
+}
+
+/**
+ * Create a named pivot Object3D with a primitive shell mesh child offset so
+ * the limb extends away from the pivot point. Optional extra detail meshes
+ * (joint pucks, panels) are added at the pivot so they stay at the joint.
  * @param {string} name
- * @param {THREE.BufferGeometry} geometry
- * @param {THREE.Material} material
- * @param {[number, number, number]} meshOffset local offset of the mesh
+ * @param {THREE.BufferGeometry} geometry shell geometry
+ * @param {THREE.Material} material shell material
+ * @param {[number, number, number]} meshOffset local offset of the shell mesh
+ * @param {THREE.Object3D[]} [details] cosmetic child meshes added at the pivot
  * @returns {THREE.Object3D}
  */
-function makeSegment(name, geometry, material, meshOffset) {
+function makeSegment(name, geometry, material, meshOffset, details = []) {
   const pivot = new THREE.Object3D();
   pivot.name = name;
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(meshOffset[0], meshOffset[1], meshOffset[2]);
   mesh.castShadow = true;
   pivot.add(mesh);
+  for (const d of details) pivot.add(d);
   return pivot;
 }
 
 /**
  * Build one arm chain: upper_arm -> forearm -> hand, hanging downward from
- * the shoulder pivot so rotations read naturally.
+ * the shoulder pivot. Blocky printed shells with a dark actuator puck at the
+ * shoulder and elbow joints.
  * @param {'left'|'right'} side
- * @param {THREE.Material} material
+ * @param {{ shell: THREE.Material, joint: THREE.Material, accent: THREE.Material }} mats
  * @returns {Record<string, THREE.Object3D>} segments keyed by name
  */
-function buildArm(side, material) {
+function buildArm(side, mats) {
   const sx = side === 'left' ? 1 : -1;
-  const upper = makeSegment(`${side}_upper_arm`,
-    new THREE.CapsuleGeometry(0.05, 0.22, 4, 10), material, [0, -0.14, 0]);
-  upper.position.set(sx * 0.20, 0.56, 0);
 
+  // Upper arm: rounded box shell + dark shoulder puck at the pivot.
+  const shoulderPuck = makeJointPuck(0.045, 0.07, mats.joint, 'x');
+  const upper = makeSegment(`${side}_upper_arm`,
+    new THREE.BoxGeometry(0.06, 0.18, 0.06), mats.shell, [0, -0.11, 0],
+    [shoulderPuck]);
+  upper.position.set(sx * 0.15, 0.34, 0);
+
+  // Forearm: slimmer shell + dark elbow puck at the pivot.
+  const elbowPuck = makeJointPuck(0.035, 0.055, mats.joint, 'x');
   const fore = makeSegment(`${side}_forearm`,
-    new THREE.CapsuleGeometry(0.045, 0.20, 4, 10), material, [0, -0.13, 0]);
-  fore.position.set(0, -0.28, 0);
+    new THREE.BoxGeometry(0.05, 0.16, 0.05), mats.shell, [0, -0.10, 0],
+    [elbowPuck]);
+  fore.position.set(0, -0.21, 0);
   upper.add(fore);
 
+  // Hand: small dark gripper block.
   const hand = makeSegment(`${side}_hand`,
-    new THREE.BoxGeometry(0.08, 0.1, 0.05), material, [0, -0.06, 0]);
-  hand.position.set(0, -0.26, 0);
+    new THREE.BoxGeometry(0.05, 0.08, 0.035), mats.joint, [0, -0.05, 0]);
+  hand.position.set(0, -0.20, 0);
   fore.add(hand);
 
   return { [`${side}_upper_arm`]: upper, [`${side}_forearm`]: fore, [`${side}_hand`]: hand };
@@ -319,82 +424,116 @@ function buildArm(side, material) {
 
 /**
  * Build one leg chain: thigh -> shin -> foot, hanging downward so the feet
- * reach the floor when the rig root sits at pelvis height.
+ * reach the floor. Blocky printed shells with dark hip and knee pucks.
  * @param {'left'|'right'} side
- * @param {THREE.Material} material
+ * @param {{ shell: THREE.Material, joint: THREE.Material, accent: THREE.Material }} mats
  * @returns {Record<string, THREE.Object3D>} segments keyed by name
  */
-function buildLeg(side, material) {
+function buildLeg(side, mats) {
   const sx = side === 'left' ? 1 : -1;
-  const thigh = makeSegment(`${side}_thigh`,
-    new THREE.CapsuleGeometry(0.08, 0.30, 4, 10), material, [0, -0.22, 0]);
-  thigh.position.set(sx * 0.10, 0, 0);
 
+  // Thigh: chunky printed shell + dark hip actuator puck at the pivot.
+  const hipPuck = makeJointPuck(0.06, 0.085, mats.joint, 'x');
+  const thigh = makeSegment(`${side}_thigh`,
+    new THREE.BoxGeometry(0.085, 0.26, 0.09), mats.shell, [0, -0.16, 0],
+    [hipPuck]);
+  thigh.position.set(sx * 0.085, -0.02, 0);
+
+  // Shin: tapered shell + dark knee puck at the pivot.
+  const kneePuck = makeJointPuck(0.05, 0.07, mats.joint, 'x');
   const shin = makeSegment(`${side}_shin`,
-    new THREE.CapsuleGeometry(0.07, 0.30, 4, 10), material, [0, -0.22, 0]);
-  shin.position.set(0, -0.44, 0);
+    new THREE.BoxGeometry(0.07, 0.26, 0.075), mats.shell, [0, -0.16, 0],
+    [kneePuck]);
+  shin.position.set(0, -0.34, 0);
   thigh.add(shin);
 
+  // Foot: flat dark sole that extends forward.
   const foot = makeSegment(`${side}_foot`,
-    new THREE.BoxGeometry(0.10, 0.06, 0.24), material, [0, -0.03, 0.07]);
-  foot.position.set(0, -0.44, 0);
+    new THREE.BoxGeometry(0.085, 0.045, 0.20), mats.joint, [0, -0.022, 0.06]);
+  foot.position.set(0, -0.34, 0);
   shin.add(foot);
 
   return { [`${side}_thigh`]: thigh, [`${side}_shin`]: shin, [`${side}_foot`]: foot };
 }
 
 /**
- * Build a clean teal humanoid from capsules and boxes with a correct
- * parent-child hierarchy so every joint animates its descendants.
+ * Build a Berkeley-Humanoid-Lite-styled humanoid: white printed shells with
+ * dark modular joints, flat chest/pelvis panels, exposed actuator pucks, and a
+ * compact rectangular sensor head. Keeps the exact named pivot hierarchy the
+ * animation contract depends on.
  * @returns {{ root: THREE.Object3D, segments: Record<string, THREE.Object3D> }}
  */
 function buildProceduralRobot() {
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: ROBOT_TEAL, metalness: 0.35, roughness: 0.5,
-  });
+  const mats = robotMaterials();
 
-  // Torso (root): pelvis at the rig origin, body extends upward.
+  // Torso (root): pelvis block at the rig origin, chest shell above it.
+  // Cosmetic children: a dark pelvis girdle and a chest sensor strip.
+  const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.08, 0.13), mats.joint);
+  pelvis.position.set(0, 0.02, 0);
+  pelvis.castShadow = true;
+
+  const chestStrip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.005), mats.accent);
+  chestStrip.position.set(0, 0.30, 0.085);
+
+  const shoulderYoke = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 0.09), mats.joint);
+  shoulderYoke.position.set(0, 0.36, 0);
+  shoulderYoke.castShadow = true;
+
   const torso = makeSegment('torso',
-    new THREE.CapsuleGeometry(0.16, 0.42, 6, 12), bodyMat, [0, 0.34, 0]);
+    new THREE.BoxGeometry(0.20, 0.30, 0.13), mats.shell, [0, 0.20, 0],
+    [pelvis, chestStrip, shoulderYoke]);
+
+  // Head: compact rectangular sensor head with a dark visor face.
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.05, 0.01), mats.joint);
+  visor.position.set(0, 0.0, 0.06);
   const head = makeSegment('head',
-    new THREE.SphereGeometry(0.13, 16, 16), bodyMat, [0, 0, 0]);
-  head.position.set(0, 0.72, 0);
+    new THREE.BoxGeometry(0.13, 0.11, 0.11), mats.shell, [0, 0, 0], [visor]);
+  head.position.set(0, 0.46, 0);
   torso.add(head);
 
   const segments = { torso, head };
   for (const side of ['left', 'right']) {
-    const arm = buildArm(side, bodyMat);
-    const leg = buildLeg(side, bodyMat);
+    const arm = buildArm(side, mats);
+    const leg = buildLeg(side, mats);
     Object.assign(segments, arm, leg);
     torso.add(arm[`${side}_upper_arm`], leg[`${side}_thigh`]);
   }
   return { root: torso, segments };
 }
 
-// Maps each of the 19 joints (in JOINT_NAMES order) to a rig segment and the
-// local rotation axis it drives: hip yaw=Y / roll=Z / pitch=X,
-// knee/ankle/elbow = pitch(X), shoulder pitch=X / roll=Z, wrist = roll(Y),
-// torso = yaw(Y).
+// Maps each of the 29 G1 joints (in JOINT_NAMES order) to a rig segment and
+// the local rotation axis it drives: pitch=X, roll=Z, yaw=Y. Multiple joints
+// land on one segment via distinct axes (e.g. the hip's pitch/roll/yaw).
 const JOINT_TARGETS = [
-  ['left_thigh', 'y'],   // left_hip_yaw
-  ['left_thigh', 'z'],   // left_hip_roll
   ['left_thigh', 'x'],   // left_hip_pitch
+  ['left_thigh', 'z'],   // left_hip_roll
+  ['left_thigh', 'y'],   // left_hip_yaw
   ['left_shin', 'x'],    // left_knee
-  ['left_foot', 'x'],    // left_ankle
-  ['right_thigh', 'y'],  // right_hip_yaw
-  ['right_thigh', 'z'],  // right_hip_roll
+  ['left_foot', 'x'],    // left_ankle_pitch
+  ['left_foot', 'z'],    // left_ankle_roll
   ['right_thigh', 'x'],  // right_hip_pitch
+  ['right_thigh', 'z'],  // right_hip_roll
+  ['right_thigh', 'y'],  // right_hip_yaw
   ['right_shin', 'x'],   // right_knee
-  ['right_foot', 'x'],   // right_ankle
-  ['torso', 'y'],        // torso
+  ['right_foot', 'x'],   // right_ankle_pitch
+  ['right_foot', 'z'],   // right_ankle_roll
+  ['torso', 'y'],        // waist_yaw
+  ['torso', 'z'],        // waist_roll
+  ['torso', 'x'],        // waist_pitch
   ['left_upper_arm', 'x'],   // left_shoulder_pitch
   ['left_upper_arm', 'z'],   // left_shoulder_roll
+  ['left_upper_arm', 'y'],   // left_shoulder_yaw
   ['left_forearm', 'x'],     // left_elbow
+  ['left_hand', 'y'],        // left_wrist_roll
+  ['left_hand', 'x'],        // left_wrist_pitch
+  ['left_hand', 'z'],        // left_wrist_yaw
   ['right_upper_arm', 'x'],  // right_shoulder_pitch
   ['right_upper_arm', 'z'],  // right_shoulder_roll
+  ['right_upper_arm', 'y'],  // right_shoulder_yaw
   ['right_forearm', 'x'],    // right_elbow
-  ['left_hand', 'y'],    // left_wrist_roll
-  ['right_hand', 'y'],   // right_wrist_roll
+  ['right_hand', 'y'],       // right_wrist_roll
+  ['right_hand', 'x'],       // right_wrist_pitch
+  ['right_hand', 'z'],       // right_wrist_yaw
 ];
 
 function installProceduralRobot() {
@@ -447,7 +586,7 @@ function buildCapsulePlaceholder_old() {
 
 const loader = new GLTFLoader();
 loader.load(
-  '/assets/h1.glb',
+  '/assets/g1.glb',
   (gltf) => {
     // Only trust the GLB if it carries a real skinned skeleton with bones.
     const bones = [];
@@ -570,22 +709,24 @@ function handleFrame(frame) {
   _statusStep.textContent = `step ${frame.step}`;
   _statusFps.textContent  = `${_fpsSmooth.toFixed(0)} fps`;
 
-  // Update robot position & heading
-  const [px, py, pz] = frame.position;
-  robotGroup.position.set(px, py, pz);
-  robotGroup.rotation.y = frame.heading;
+  // Update robot position & heading. MuJoCo is Z-up; the viewer is Y-up, so
+  // remap mj(x, y, z) -> three(x, z, y) — putting the real pelvis height on
+  // the vertical axis and the mj horizontal y onto three's z (consistent with
+  // how obstacles and waypoints are placed).
+  const [mjx, mjy, mjz] = frame.position;
+  const wx = mjx, wy = mjz, wz = mjy;
+  robotGroup.position.set(wx, wy, wz);
+  // Rig forward is +Z; face the travel direction (mj heading yaw about up).
+  robotGroup.rotation.y = Math.PI / 2 - frame.heading;
 
   // Drive the active robot rig (procedural or GLB) from the joint stream.
   if (frame.joints) applyJoints(frame.joints);
 
-  // Follow camera
-  const behind = new THREE.Vector3(
-    px - Math.sin(frame.heading) * 6,
-    py + 3,
-    pz - Math.cos(frame.heading) * 6,
-  );
+  // Follow camera, trailing the robot along its travel direction.
+  const fwdX = Math.cos(frame.heading), fwdZ = Math.sin(frame.heading);
+  const behind = new THREE.Vector3(wx - fwdX * 6, wy + 3, wz - fwdZ * 6);
   camera.position.lerp(behind, 0.04);
-  controls.target.lerp(new THREE.Vector3(px, py + 1, pz), 0.08);
+  controls.target.lerp(new THREE.Vector3(wx, wy + 1, wz), 0.08);
 
   // Update dynamic obstacle positions
   if (frame.obstacles) updateObstacles(frame.obstacles);

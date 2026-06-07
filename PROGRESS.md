@@ -85,5 +85,100 @@ None yet.
 - Added `#scene-indicator` to the status bar in `index.html`, next to the
   connection dot.
 
+### Robot swap — H1 → Unitree G1 (29 DOF)
+- Switched the simulated robot from H1 (19 DOF) to the Menagerie Unitree G1
+  (`unitree_g1/g1.xml`, 29 DOF, standing pelvis height 0.79 m).
+- New `src/backend/g1_env.py` (`G1TraversalEnv`): same traversal logic as the
+  H1 env but loads g1.xml and **derives obs/action dims from the model**
+  (`model.nu`), so contracts auto-size. Observation is now 67-dim
+  (29 joint_pos + 29 joint_vel + 3 lin_vel + 3 proj_grav + 2 goal_vec +
+  1 goal_dist); action is 29-dim. `h1_env.py` retained (retired) per the
+  never-delete rule.
+- `server.py` imports `G1TraversalEnv`; WS frame `joints` slice is now
+  `qpos[7:7+n_joints]` (model-derived, was hard-coded `[7:26]`).
+- `viewer.js`: `JOINT_NAMES` + `JOINT_TARGETS` rewritten to the G1's 29-joint
+  actuator order (hip pitch/roll/yaw, knee, ankle pitch/roll ×2; waist
+  yaw/roll/pitch; shoulder pitch/roll/yaw, elbow, wrist roll/pitch/yaw ×2);
+  procedural rig rescaled to G1 proportions (~1.3 m); GLB attempt now points
+  at `/assets/g1.glb` (absent → clean procedural fallback).
+- `index.html` About panel + tests updated to G1 (29 joints, 67-dim).
+  `test_env.py` and `test_ws.py` both pass.
+- Model fetched via sparse clone into `mujoco_menagerie/unitree_g1/`
+  (the menagerie submodule is uninitialized; this sits under the gitlink).
+
 ### Next
-- Phase 8 — Manipulation Task System (8.1 first).
+- Phase 8 — Manipulation Task System (8.1 first), now targeting G1.
+
+---
+
+## Session — Robot visual realism (Berkeley Humanoid Lite styling)
+**Date**: 2026-06-07
+
+### Robot visual realism — Berkeley Humanoid Lite styling
+Restyled the procedural robot rig in `src/frontend/viewer.js` to resemble the
+open-source Berkeley Humanoid Lite (a ~1 m, ~16 kg 3D-printed humanoid: light
+white printed shells, dark structural joint housings, exposed cylindrical
+actuator "pucks" at hips/shoulders/knees/elbows, blocky modular limb segments,
+flat chest/pelvis panels, compact rectangular sensor head).
+
+- **Color scheme / materials**: Replaced the single teal `MeshStandardMaterial`
+  with a `robotMaterials()` factory returning three shared materials — an
+  off-white printed `shell` (`0xeef0f2`, low metalness/high roughness), a dark
+  metallic `joint` (`0x1b1d22`) for actuator housings, and a small teal
+  `accent` (`0x00e5cc`, emissive) for a chest status strip. `ROBOT_TEAL` kept
+  as the constant name (now the off-white shell color) plus new
+  `ROBOT_JOINT_DARK` / `ROBOT_ACCENT` constants.
+- **Geometry**: Switched limb shells from capsules to blocky rounded `BoxGeometry`
+  shells (modular printed look). Torso is now a box chest shell; head is a
+  compact rectangular box (was a sphere).
+- **Detail meshes (cosmetic children inside pivots)**: Added `makeJointPuck()`
+  helper producing dark cylinders; pucks sit at the shoulder, elbow, hip, and
+  knee pivots. Torso pivot carries a dark pelvis girdle block, a dark shoulder
+  yoke, and a teal emissive chest sensor strip. Head pivot carries a dark visor
+  face. Hands and feet are dark joint-material blocks (gripper / sole).
+- **Proportions**: Shrunk toward the ~0.9 m Berkeley Lite scale; legs still hang
+  so feet reach ~y=0 at standing height.
+
+### Animation contract preserved
+- `makeSegment` keeps the pivot-at-joint convention (added an optional
+  `details` array for cosmetic children at the pivot).
+- `buildProceduralRobot()` still returns `{ root, segments }`; all 14 segment
+  names intact: torso, head, {left,right}_{upper_arm,forearm,hand,thigh,shin,foot}.
+- No changes to JOINT_NAMES, JOINT_TARGETS, applyJoints, installers, GLB/splat
+  loaders, lobby, WS, waypoints, camera, or exports.
+- Syntax verified: `node --input-type=module --check` passes.
+
+---
+
+## Session — Standing fix + splat alignment
+**Date**: 2026-06-07
+
+### Coordinate bug (robot looked sunk/sitting) — fixed
+- Root cause: MuJoCo is **Z-up**, but `handleFrame` in `viewer.js` placed the
+  robot with `position.set(x, y, z)` treating mj `y` (a ~0 horizontal coord)
+  as the vertical, so the real pelvis height (mj `z`≈0.79) went onto a
+  horizontal axis and the robot rendered sunk to the floor.
+- Fix: remap mj `(x, y, z)` → three `(x, z, y)` so height lands on the Y axis
+  (consistent with how obstacles/waypoints already map). Robot facing set to
+  `π/2 − heading` (rig forward is +Z); follow-camera updated to trail along
+  the travel direction.
+
+### Untrained preview mode (no flailing) — added
+- With no checkpoint the server was feeding random torques → the G1 fell
+  instantly. Added `G1TraversalEnv.preview_step()`: a kinematic standing pose
+  (held at the home keyframe) that glides the base toward the active waypoint
+  at ~0.8 m/s and faces it — no dynamics, so it stays upright. `server.py`
+  uses it when `model is None`; trained checkpoints still run real physics.
+- Also added `home_pose_action()` (keyframe-pose action) for completeness.
+- Verified: WS stream holds pelvis z=0.790 and advances toward the goal.
+
+### Splat alignment wired
+- `assets/scene.splat` created from `scene.ply` (5.72M splats, 183 MB) via the
+  new `src/backend/ply_to_splat.py`. Server serves it (200 OK).
+- `viewer.js` applies a `SPLAT_ALIGNMENT` transform on load with live console
+  hooks (`window.splatTransform.setRotation/Position/Scale/get`) to tune
+  against the real capture, then bake values back into the constant.
+
+### Robot visual — Berkeley Humanoid Lite styling landed (parallel agent)
+- See entry above; rig restyled to off-white shells + dark joint pucks. All 14
+  segment names + animation contract preserved.
