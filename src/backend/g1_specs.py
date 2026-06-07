@@ -154,6 +154,11 @@ CONTINUOUS_PAYLOAD_KG: Tuple[float, float] = (2.0, 3.0)  # (base, ultimate) per 
 # Tasks opt into this explicitly (PF-8); payload capped low when assumed.
 DEX_HAND_PAYLOAD_KG: float = 2.0           # ASSUMPTION (add-on; not on base G1)
 
+# Default capability: base G1 assumes NO dexterous hand. A task may opt in (see
+# src/backend/tasks/capabilities.py), which caps payload at DEX_HAND_PAYLOAD_KG
+# and MUST be labeled "assumes Dex5 hand" in the UI. Do not silently fake grasps.
+ASSUMES_DEX5_HAND: bool = False
+
 
 # --- Ordered-array accessors -----------------------------------------------
 def peak_torque_array() -> np.ndarray:

@@ -347,3 +347,21 @@ push-based unless a task explicitly opts into an assumed dexterous hand.
 - Test (`test_feasibility.py`): verdict rules; physics run -> INFEASIBLE (hip at
   peak 94% of steps); preview -> FEASIBLE (stability-only); compact shape; JSON
   round-trip. viewer.js parses; server imports; PF-1..6 regressions pass.
+
+### PF-8 — Task honesty reframing (no hands on base G1) — COMPLETE
+- Phase 8 task envs don't exist yet, so PF-8 lands the *honesty framework* they
+  must follow (rather than building 3 RL envs in a fidelity phase).
+- `g1_specs.py`: added `ASSUMES_DEX5_HAND = False` (tasks opt in explicitly;
+  HAS_HANDS already False, DEX_HAND_PAYLOAD_KG=2.0).
+- `src/backend/tasks/` package + `capabilities.py`: `ManipulationMode`
+  (PUSH / CARRY_DEX_HAND), frozen `TaskCapability`, `max_payload_kg`
+  (0 without a hand = push only), `validate_object_mass`, and push-based reward
+  helpers (`reach_object_reward`, `push_progress_reward` — NO grasp term).
+- `TASK_CAPABILITIES` registry: box_sort + table_setup = PUSH (no grasp);
+  package_delivery = CARRY_DEX_HAND, assumes a Dex5 hand, mass-capped at 2 kg,
+  to be UI-labeled. Each carries one-line real-world context distinguishing base
+  G1 (push) from a hand add-on (grasp/carry) — feeds Phase 9.3.
+- `docs/manipulation_honesty.md`: policy + rules for building the Phase 8 envs.
+- Test (`test_capabilities.py`): base G1 can't grasp, push tasks have no lift cap,
+  package_delivery mass-gated to Dex cap, push rewards + context all honest.
+- Grasping is NOT faked anywhere — the whole point of the phase.
