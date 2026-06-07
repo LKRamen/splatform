@@ -182,3 +182,38 @@ flat chest/pelvis panels, compact rectangular sensor head).
 ### Robot visual — Berkeley Humanoid Lite styling landed (parallel agent)
 - See entry above; rig restyled to off-white shells + dark joint pucks. All 14
   segment names + animation contract preserved.
+
+---
+
+## Phase PF — Physical Fidelity & Sim-to-Real Validation (adapted to G1)
+**Date**: 2026-06-07
+**Note**: plan.md (`plan.md`) was written for the H1 robot. The live demo robot
+is the Unitree G1 (29-DOF, `g1_env.py`). Per user decision, the whole PF phase
+is **adapted to G1**: specs/files/joint-count/numbers all target G1, following
+the plan's structure and intent. plan.md itself is NOT edited mid-run (run-plan
+orchestrator rule); completion is tracked here.
+
+### PF-0 — Spec config (`src/backend/g1_specs.py`) — COMPLETE
+Single source of truth for real Unitree G1 numbers. Two honesty tiers:
+- **MODEL (authoritative)**: peak torque per joint read from g1.xml
+  `jnt_actfrcrange` (hip-roll/knee 139, hip-pitch/yaw + waist-yaw 88, ankle +
+  waist-roll/pitch 50, arms 25, wrist-pitch/yaw 5 N·m); joint position ranges;
+  29 actuators. `verify_against_model()` asserts the baked constants still match
+  the loaded model so they cannot silently drift (passes).
+- **PUBLISHED**: mass 35 kg (model sums ~33.3), height 1.32 m, 13S 9 Ah battery
+  w/ 54 V charger → ~486 Wh, ~2 kg/arm payload (3 kg EDU), 29-DOF this variant.
+
+### ASSUMPTIONS logged (not published by Unitree)
+- **CONTINUOUS_TORQUE_NM = 0.35 × peak** — Unitree publishes no continuous
+  (thermal) rating. Used only for the PF-3 *relative* duty-cycle warning.
+- **VELOCITY_LIMIT_RAD_S = 30.0 (all joints)** — MuJoCo encodes no joint
+  velocity limit and Unitree publishes no clean per-joint max speed. Conservative
+  single default; relative saturation signal only.
+- **BATTERY_WH = 486** — derived 9 Ah × 54 V (max/charge voltage); nominal
+  (~47 V) would give ~423 Wh, so usable energy sits in ~423–486 Wh.
+- **DEX_HAND_PAYLOAD_KG = 2.0** — dexterous-hand add-on; base G1 cannot grasp.
+
+### Honesty note
+Base G1 (and this 29-DOF model) has **no actuated fingers** → cannot grasp.
+The model's `rubber_hand` geoms are fixed. PF-8 reframes manipulation as
+push-based unless a task explicitly opts into an assumed dexterous hand.
