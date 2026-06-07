@@ -365,3 +365,28 @@ push-based unless a task explicitly opts into an assumed dexterous hand.
 - Test (`test_capabilities.py`): base G1 can't grasp, push tasks have no lift cap,
   package_delivery mass-gated to Dex cap, push rewards + context all honest.
 - Grasping is NOT faked anywhere — the whole point of the phase.
+
+### PF-9 — Berkeley Humanoid Lite cross-check (stretch) — COMPLETE
+- `docs/physical_validation.md`: credibility note for judges — tabulates which G1
+  numbers are MODEL-grounded (peak torque/limits read from MJCF, mass, battery)
+  vs ASSUMPTIONS (continuous torque, efficiency, velocity), and explains the
+  feasibility verdict leans on grounded numbers while assumed ones only ever
+  downgrade to MARGINAL with a caveat. Compares thresholds *in spirit* to the
+  fully-published Berkeley Humanoid Lite (arXiv 2504.17249).
+- `src/backend/berkeley_lite_specs.py`: second spec profile, same interface as
+  g1_specs (peak/continuous/velocity arrays + battery/mass/payload). PUBLISHED:
+  16 kg, 0.8 m, 6S 4 Ah ~88.8 Wh. APPROX (flagged): representative two-size
+  cycloidal torque profile (per-joint torques not in the cited source).
+- Test (`test_cross_check.py`): both profiles expose the same interface; the
+  SAME SaturationLogger and feasibility engine run on the Berkeley profile
+  (verdict INFEASIBLE from Berkeley sat data) — proving the tooling is
+  robot-agnostic.
+
+---
+
+## Phase PF — COMPLETE (PF-0 through PF-9)
+All physical-fidelity items done. New test scripts: test_saturation, test_realism,
+test_domain_rand, test_stability, test_feasibility, test_capabilities,
+test_cross_check (plus existing test_env). Live demo gains a hardware-feasibility
+badge; the env now has a real floor and a physics-grounded "can the real G1 do
+this?" verdict, with assumptions isolated and labeled throughout.
