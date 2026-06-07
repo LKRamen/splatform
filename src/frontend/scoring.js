@@ -97,7 +97,7 @@ window.addEventListener('wsframe', (e) => {
 // ------------------------------------------------------------------
 const chartCanvas = document.getElementById('reward-chart');
 if (chartCanvas) {
-  import('https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js')
+  import('/assets/vendor/chart.umd.min.js')
     .then(() => {
       const { Chart } = window;
       if (!Chart) return;

@@ -186,8 +186,7 @@ scene.add(lobbyGroup);
 // Gaussian splat loading pipeline (@mkkellogg/gaussian-splats-3d)
 // ------------------------------------------------------------------
 const SPLAT_URL = '/assets/scene.splat';
-const SPLAT_MODULE_URL =
-  'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.1/build/gaussian-splats-3d.module.js';
+const SPLAT_MODULE_URL = '/assets/vendor/gaussian-splats-3d.module.js';
 
 const splatOverlay = document.getElementById('splat-overlay');
 const splatPct = document.getElementById('splat-pct');
