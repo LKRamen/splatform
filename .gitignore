@@ -1,0 +1,8 @@
+# Python build artifacts
+__pycache__/
+*.py[cod]
+
+# Large reconstruction assets — distribute separately or via Git LFS.
+# (scene.ply ~320 MB, scene.splat ~183 MB; convert with src/backend/ply_to_splat.py)
+*.ply
+*.splat
