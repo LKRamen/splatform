@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from stable_baselines3 import PPO
-from src.backend.h1_env import H1TraversalEnv
+from src.backend.g1_env import G1TraversalEnv
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), 'checkpoints')
 FRAME_INTERVAL = 0.02   # 50 fps
@@ -64,7 +64,7 @@ def set_waypoints(body: WaypointsBody):
 async def simulate(websocket: WebSocket, checkpoint_version: str):
     await websocket.accept()
     ckpt_path = os.path.join(CHECKPOINT_DIR, f'{checkpoint_version}.zip')
-    env = H1TraversalEnv(waypoints=[np.array(wp) for wp in _current_waypoints])
+    env = G1TraversalEnv(waypoints=[np.array(wp) for wp in _current_waypoints])
     model = None
     if os.path.exists(ckpt_path):
         model = PPO.load(ckpt_path, env=env)
@@ -73,11 +73,13 @@ async def simulate(websocket: WebSocket, checkpoint_version: str):
         while True:
             if model is not None:
                 action, _ = model.predict(obs, deterministic=True)
+                obs, reward, terminated, truncated, info = env.step(action)
             else:
-                action = env.action_space.sample()
-            obs, reward, terminated, truncated, info = env.step(action)
+                # No trained checkpoint: show a clean standing/glide preview
+                # instead of flailing on random torques.
+                obs, reward, terminated, truncated, info = env.preview_step()
             frame = {
-                'joints':    env.data.qpos[7:26].tolist(),
+                'joints':    env.data.qpos[7:7 + env.n_joints].tolist(),
                 'position':  info['position'],
                 'heading':   info['heading'],
                 'step':      env._step_count,

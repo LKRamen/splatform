@@ -2,11 +2,13 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import numpy as np
-from src.backend.h1_env import H1TraversalEnv
+from src.backend.g1_env import G1TraversalEnv
 
-env = H1TraversalEnv()
+env = G1TraversalEnv()
 obs, _ = env.reset()
-assert obs.shape == (47,), f'Expected (47,), got {obs.shape}'
+expected = env.observation_space.shape
+assert obs.shape == expected, f'Expected {expected}, got {obs.shape}'
+assert env.n_joints == 29, f'Expected 29 G1 joints, got {env.n_joints}'
 
 rewards = []
 for i in range(200):

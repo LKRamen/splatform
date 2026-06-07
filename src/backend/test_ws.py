@@ -17,8 +17,8 @@ async def main():
             frames.append(frame)
 
     first, last = frames[0], frames[-1]
-    assert len(first['joints']) == 19, f'Expected 19 joints, got {len(first["joints"])}'
-    assert len(last['joints'])  == 19, f'Expected 19 joints, got {len(last["joints"])}'
+    assert len(first['joints']) == 29, f'Expected 29 joints, got {len(first["joints"])}'
+    assert len(last['joints'])  == 29, f'Expected 29 joints, got {len(last["joints"])}'
     assert 'scores' in first
     assert 'position' in first
     assert len(first['position']) == 3
