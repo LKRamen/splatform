@@ -21,6 +21,7 @@ from src.training.rewards import (
 from src.backend import g1_specs
 from src.backend.physical.saturation import SaturationLogger
 from src.backend.physical.power import PowerLogger
+from src.backend.physical.thermal import ThermalLogger
 
 _XML_PATH = os.path.join(os.path.dirname(__file__), '../../mujoco_menagerie/unitree_g1/g1.xml')
 
@@ -95,6 +96,9 @@ class G1TraversalEnv(gym.Env):
             list(g1_specs.JOINT_NAMES), self._peak_torque, self._vel_limit
         )
         self._power_logger = PowerLogger()
+        self._thermal_logger = ThermalLogger(
+            g1_specs.continuous_torque_array(), self.model.opt.timestep
+        )
 
         # Dimensions derived from the model: nu actuated joints, free base
         # occupies qpos[:7] / qvel[:6].
@@ -183,10 +187,15 @@ class G1TraversalEnv(gym.Env):
         velocity = self.data.qvel[6:6 + self.n_joints]
         self._sat_logger.update(torque, velocity)
         self._power_logger.update(torque, velocity, self.model.opt.timestep)
+        self._thermal_logger.update(torque)
 
     def get_power_report(self):
         """Power/energy section for the current episode (PF-2)."""
         return self._power_logger.report()
+
+    def get_thermal_report(self):
+        """Per-joint thermal duty-cycle section for the episode (PF-3)."""
+        return self._thermal_logger.report_named(g1_specs.JOINT_NAMES)
 
     def get_saturation_report(self):
         """Per-joint saturation stats for the current episode (PF-1)."""
@@ -228,6 +237,7 @@ class G1TraversalEnv(gym.Env):
         self._prev_dist = self._goal_dist()
         self._sat_logger.reset()
         self._power_logger.reset()
+        self._thermal_logger.reset()
         return self._get_obs(), {}
 
     def preview_step(self):
@@ -335,6 +345,7 @@ class G1TraversalEnv(gym.Env):
         if (terminated or truncated) and self._verbose_physical:
             self.print_saturation_summary()
             print(self._power_logger.summary_str())
+            print(self._thermal_logger.summary_str(g1_specs.JOINT_NAMES))
 
         info = {
             'scores': {

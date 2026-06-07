@@ -254,3 +254,16 @@ push-based unless a task explicitly opts into an assumed dexterous hand.
   Matches plan expectation that a hard policy yields a *short* runtime; a trained
   gentle walker would land near the published ~2 h. est_runtime is finite/positive;
   peak >= mean >= 0.
+
+### PF-3 — Thermal duty-cycle check — COMPLETE
+- `src/backend/physical/thermal.py`: `ThermalLogger`. Sliding-window (default
+  2 s = 1000 steps @ 500 Hz) RMS torque per joint via O(1) running sum-of-squares.
+  Tracks per-joint max windowed RMS, % of continuous rating, overheat_risk bool,
+  and over-duration (seconds windowed RMS stayed above continuous).
+- `g1_env.py`: thermal logger wired into `_log_physical` / reset / verbose print;
+  `get_thermal_report()` keyed by joint name.
+- Output carries an explicit CAVEAT that continuous ratings are ASSUMPTIONS
+  (0.35*peak), so overheat flags are a *relative* duty-cycle warning, not an
+  absolute thermal prediction.
+- Test: random policy flags 29/29 joints (RMS ~285.7% = 1/0.35 of continuous, as
+  expected when peak torque is sustained). pct/duration non-negative, risk bool.
