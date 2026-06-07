@@ -239,3 +239,18 @@ push-based unless a task explicitly opts into an assumed dexterous hand.
 - Design note: G1 uses position actuators, so torque cannot be commanded
   directly; the realised joint torque is bounded by jnt_actfrcrange. We set that
   range from the spec so physics (not just Python) enforces the real limit.
+
+### PF-2 — Power & energy budget — COMPLETE
+- `src/backend/physical/power.py`: `PowerLogger`. Per step mechanical power per
+  joint = torque * joint_vel; electrical draw P_elec = sum(max(p_joint,0)) / EFF
+  (no regen recovery). Tracks peak electrical W, mean electrical W (energy/time),
+  and est_runtime_min = BATTERY_WH / mean_W * 60.
+- `g1_env.py`: `_log_physical()` now feeds both saturation (PF-1) and power
+  (PF-2) loggers from the same realised torque/velocity; `get_power_report()`;
+  reset + verbose print wired.
+- **ASSUMPTION**: EFFICIENCY = 0.7 (Unitree does not publish drivetrain
+  efficiency) — logged here.
+- Test: random (worst-case) policy → mean ~7.2 kW → ~4 min runtime, peak ~22 kW.
+  Matches plan expectation that a hard policy yields a *short* runtime; a trained
+  gentle walker would land near the published ~2 h. est_runtime is finite/positive;
+  peak >= mean >= 0.

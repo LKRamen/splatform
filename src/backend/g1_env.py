@@ -20,6 +20,7 @@ from src.training.rewards import (
 )
 from src.backend import g1_specs
 from src.backend.physical.saturation import SaturationLogger
+from src.backend.physical.power import PowerLogger
 
 _XML_PATH = os.path.join(os.path.dirname(__file__), '../../mujoco_menagerie/unitree_g1/g1.xml')
 
@@ -93,6 +94,7 @@ class G1TraversalEnv(gym.Env):
         self._sat_logger = SaturationLogger(
             list(g1_specs.JOINT_NAMES), self._peak_torque, self._vel_limit
         )
+        self._power_logger = PowerLogger()
 
         # Dimensions derived from the model: nu actuated joints, free base
         # occupies qpos[:7] / qvel[:6].
@@ -168,17 +170,23 @@ class G1TraversalEnv(gym.Env):
         half = (self._jnt_hi - self._jnt_lo) * 0.5
         self.data.ctrl[:] = mid + action * half
 
-    def _log_saturation(self):
-        """Record this step's realised joint torque & velocity (PF-1).
+    def _log_physical(self):
+        """Record this step's realised joint torque & velocity (PF-1, PF-2).
 
         Uses qfrc_actuator (the actuator torque applied in joint space *after*
         jnt_actfrcrange clamping) rather than actuator_force (the pre-clamp
         servo output), so the logged torque is the one the joint truly delivers
-        and stays within the physics-enforced peak.
+        and stays within the physics-enforced peak. Feeds both the saturation
+        logger (PF-1) and the power logger (PF-2) from the same arrays.
         """
         torque = self.data.qfrc_actuator[6:6 + self.n_joints]
         velocity = self.data.qvel[6:6 + self.n_joints]
         self._sat_logger.update(torque, velocity)
+        self._power_logger.update(torque, velocity, self.model.opt.timestep)
+
+    def get_power_report(self):
+        """Power/energy section for the current episode (PF-2)."""
+        return self._power_logger.report()
 
     def get_saturation_report(self):
         """Per-joint saturation stats for the current episode (PF-1)."""
@@ -219,6 +227,7 @@ class G1TraversalEnv(gym.Env):
         self._obstacles = [_DynamicObstacle(self._rng) for _ in range(_NUM_OBSTACLES)]
         self._prev_dist = self._goal_dist()
         self._sat_logger.reset()
+        self._power_logger.reset()
         return self._get_obs(), {}
 
     def preview_step(self):
@@ -280,7 +289,7 @@ class G1TraversalEnv(gym.Env):
 
         mujoco.mj_step(self.model, self.data)
         self._step_count += 1
-        self._log_saturation()
+        self._log_physical()
 
         for obs in self._obstacles:
             obs.step()
@@ -325,6 +334,7 @@ class G1TraversalEnv(gym.Env):
 
         if (terminated or truncated) and self._verbose_physical:
             self.print_saturation_summary()
+            print(self._power_logger.summary_str())
 
         info = {
             'scores': {

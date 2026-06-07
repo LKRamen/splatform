@@ -24,5 +24,14 @@ for name, r in report.items():
 print(env._sat_logger.summary_str())
 worst_name, worst_pct = env._sat_logger.worst_joint()
 print(f"\nworst joint: {worst_name} at {worst_pct:.1f}% of peak torque")
-print(f"PASS — saturation report covers {len(report)} joints, "
-      f"all within physics-enforced peak limits")
+
+# PF-2: power & energy budget
+power = env.get_power_report()
+import math
+assert power["peak_power_w"] >= power["mean_power_w"] >= 0.0
+assert power["mean_power_w"] > 0.0, "random thrashing should draw power"
+assert math.isfinite(power["est_runtime_min"]) and power["est_runtime_min"] > 0.0
+print("\n" + env._power_logger.summary_str())
+print(f"PASS — saturation report covers {len(report)} joints; "
+      f"power budget est runtime {power['est_runtime_min']:.1f} min "
+      f"(hard random policy -> short runtime, as expected)")
