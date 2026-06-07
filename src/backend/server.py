@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from stable_baselines3 import PPO
 from src.backend.g1_env import G1TraversalEnv
+from src.backend.physical import feasibility as feas
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), 'checkpoints')
 FRAME_INTERVAL = 0.02   # 50 fps
@@ -78,16 +79,25 @@ async def simulate(websocket: WebSocket, checkpoint_version: str):
                 # No trained checkpoint: show a clean standing/glide preview
                 # instead of flailing on random torques.
                 obs, reward, terminated, truncated, info = env.preview_step()
+            feas_report = env.get_feasibility_report()
             frame = {
-                'joints':    env.data.qpos[7:7 + env.n_joints].tolist(),
-                'position':  info['position'],
-                'heading':   info['heading'],
-                'step':      env._step_count,
-                'scores':    info['scores'],
-                'obstacles': info.get('obstacles', []),
+                'joints':      env.data.qpos[7:7 + env.n_joints].tolist(),
+                'position':    info['position'],
+                'heading':     info['heading'],
+                'step':        env._step_count,
+                'scores':      info['scores'],
+                'obstacles':   info.get('obstacles', []),
+                'feasibility': feas.compact(feas_report),
             }
             await websocket.send_text(json.dumps(frame))
             if terminated or truncated:
+                # Persist the full feasibility report for real (physics) runs.
+                if model is not None and feas_report['verdict'] != feas.NA:
+                    try:
+                        feas.save_feasibility_report(
+                            feas_report, CHECKPOINT_DIR, checkpoint_version)
+                    except OSError:
+                        pass
                 obs, _ = env.reset()
             await asyncio.sleep(FRAME_INTERVAL)
     except WebSocketDisconnect:

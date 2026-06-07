@@ -86,9 +86,21 @@ Server sends JSON every 20ms:
     "gait_stability": float,
     "energy": float,
     "total": float
+  },
+  "feasibility": {
+    "verdict": "FEASIBLE | MARGINAL | INFEASIBLE | N/A",
+    "reason": "one-line explanation of the dominant limit",
+    "worst_joint": "joint name most stressed, or null"
   }
 }
 ```
+
+The `feasibility` field (PF-7) is the live hardware-feasibility verdict
+aggregating the physical-fidelity checks (actuator saturation, power/runtime,
+thermal duty cycle, stability/payload). `N/A` is sent in kinematic preview mode
+(no trained checkpoint → no actuator torques); a real (physics) run yields
+FEASIBLE/MARGINAL/INFEASIBLE. Full per-run reports are saved as JSON under
+`src/backend/checkpoints/<ckpt>/feasibility/`.
 
 ## Observation space
 **Implemented now — `G1TraversalEnv` (67-dim):** joint_pos (29) + joint_vel

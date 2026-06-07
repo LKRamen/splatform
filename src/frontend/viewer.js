@@ -684,6 +684,26 @@ const _statusDot  = document.getElementById('status-dot');
 const _statusText = document.getElementById('status-text');
 const _statusStep = document.getElementById('status-step');
 const _statusFps  = document.getElementById('status-fps');
+const _feasBadge  = document.getElementById('feasibility-badge');
+
+// PF-7: colour the hardware-feasibility badge from the WS frame.
+const _FEAS_COLOR = {
+  FEASIBLE:   '#36d399',  // green
+  MARGINAL:   '#fbbd23',  // amber
+  INFEASIBLE: '#ff4466',  // red
+};
+
+/**
+ * @param {{ verdict: string, reason: string, worst_joint: ?string }} feas
+ */
+function updateFeasibilityBadge(feas) {
+  if (!_feasBadge || !feas) return;
+  const color = _FEAS_COLOR[feas.verdict] || 'var(--muted)';
+  _feasBadge.style.color = color;
+  _feasBadge.textContent = `● Feasibility: ${feas.verdict}`;
+  const worst = feas.worst_joint ? ` (worst: ${feas.worst_joint})` : '';
+  _feasBadge.title = `${feas.reason}${worst}`;
+}
 
 export function connectWS(version) {
   if (ws) ws.close();
@@ -708,6 +728,7 @@ function handleFrame(frame) {
   _fpsSmooth = _fpsSmooth * 0.9 + (1 / dt) * 0.1;
   _statusStep.textContent = `step ${frame.step}`;
   _statusFps.textContent  = `${_fpsSmooth.toFixed(0)} fps`;
+  updateFeasibilityBadge(frame.feasibility);
 
   // Update robot position & heading. MuJoCo is Z-up; the viewer is Y-up, so
   // remap mj(x, y, z) -> three(x, z, y) — putting the real pelvis height on

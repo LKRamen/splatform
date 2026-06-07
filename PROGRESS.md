@@ -327,3 +327,23 @@ push-based unless a task explicitly opts into an assumed dexterous hand.
 - Test (`test_stability.py`): geometry (centre +0.5 / outside -1.0), live standing
   robot 0 tipping with CoM ~5 cm inside support polygon, payload 2kg@0.30m OK
   (23.5%) vs 5kg@0.40m infeasible (78.5%, over cap). All PF-1..5 regressions pass.
+
+### PF-7 — Feasibility report — COMPLETE
+- `src/backend/physical/feasibility.py`: `build_feasibility_report()` aggregates
+  saturation/power/thermal/stability into FEASIBLE/MARGINAL/INFEASIBLE/N/A with
+  documented thresholds (torque-sat >20% steps -> infeasible / >5% -> marginal;
+  tipping >5% steps -> infeasible / any -> marginal; thermal >=1s over rating ->
+  infeasible / brief -> marginal; runtime <30 min -> marginal; payload_ok False
+  -> infeasible). `compact()` for the WS frame; `save_feasibility_report()` writes
+  JSON under checkpoints/<ckpt>/feasibility/.
+- `g1_env.get_feasibility_report()`: physics mode -> all four sections; kinematic
+  preview -> stability-only (no actuator torques), so the demo badge is still
+  meaningful. Added stability logging to `preview_step`.
+- `server.py`: WS frame gains `feasibility` (compact verdict+reason+worst_joint);
+  full JSON saved on episode end for real runs (guarded, OSError-safe).
+- Frontend: status-bar `#feasibility-badge` colour-coded green/amber/red via
+  `updateFeasibilityBadge` in viewer.js, tooltip shows the reason + worst joint.
+- CLAUDE.md WS contract updated with the `feasibility` field.
+- Test (`test_feasibility.py`): verdict rules; physics run -> INFEASIBLE (hip at
+  peak 94% of steps); preview -> FEASIBLE (stability-only); compact shape; JSON
+  round-trip. viewer.js parses; server imports; PF-1..6 regressions pass.

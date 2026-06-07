@@ -94,6 +94,10 @@ class StabilityLogger:
         self._warn = float(moment_warn_frac)
         self.reset()
 
+    @property
+    def steps(self) -> int:
+        return self._steps
+
     def reset(self) -> None:
         self._steps = 0
         self._tipping_violations = 0

@@ -25,6 +25,7 @@ from src.backend.physical.saturation import SaturationLogger
 from src.backend.physical.power import PowerLogger
 from src.backend.physical.thermal import ThermalLogger
 from src.backend.physical.stability import StabilityLogger, convex_hull
+from src.backend.physical import feasibility as feas
 
 _XML_PATH = os.path.join(os.path.dirname(__file__), '../../mujoco_menagerie/unitree_g1/g1.xml')
 
@@ -367,6 +368,22 @@ class G1TraversalEnv(gym.Env):
         """Stability/payload section for the current episode (PF-6)."""
         return self._stability_logger.report()
 
+    def get_feasibility_report(self):
+        """Aggregate PF-1..PF-6 into one verdict for the episode (PF-7).
+
+        Sections with no data are passed as None: in physics mode all four are
+        available; in kinematic preview only stability is meaningful (there are
+        no actuator torques), so the verdict is stability-only.
+        """
+        has_torque = self._sat_logger.steps > 0
+        has_stab = self._stability_logger.steps > 0
+        return feas.build_feasibility_report(
+            saturation=self.get_saturation_report() if has_torque else None,
+            power=self.get_power_report() if has_torque else None,
+            thermal=self.get_thermal_report() if has_torque else None,
+            stability=self.get_stability_report() if has_stab else None,
+        )
+
     def get_saturation_report(self):
         """Per-joint saturation stats for the current episode (PF-1)."""
         return self._sat_logger.report()
@@ -449,6 +466,10 @@ class G1TraversalEnv(gym.Env):
         self.data.qpos[:] = qpos
         self.data.qvel[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
+
+        # PF-7: stability is meaningful even in kinematic preview (CoM + contacts
+        # exist after mj_forward); torque-based checks are not (no actuation).
+        self._stability_logger.update_stability(self._com_xy(), self._support_hull())
 
         for obs in self._obstacles:
             obs.step()
