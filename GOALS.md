@@ -22,12 +22,12 @@ asset pipeline, and integration work is done. See PROGRESS.md for details.
   Object3D rotation axes. Keep GLB attempt — fall back to procedural if
   skeleton invalid.
 
-- [ ] **7.B** Fix viewport void: procedural fallback scene must render a
+- [x] **7.B** Fix viewport void: procedural fallback scene must render a
   full indoor lobby environment — ceiling, four walls with window cutouts,
   structural columns, interior point lights. No more black void above the
   floor grid.
 
-- [ ] **7.C** Verify splat loading pipeline end-to-end: confirm
+- [x] **7.C** Verify splat loading pipeline end-to-end: confirm
   `@mkkellogg/gaussian-splats-3d` attempts `assets/scene.splat`, shows
   progress overlay ("Loading Fordham splat... X%"), hides procedural scene
   on success, falls back cleanly on missing file. Add "Live Splat" vs

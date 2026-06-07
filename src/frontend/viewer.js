@@ -37,10 +37,126 @@ fill.position.set(-10, 5, -10);
 scene.add(fill);
 
 // ------------------------------------------------------------------
-// Floor / environment — procedural NYC-style fallback
+// Environment — procedural indoor lobby fallback (atrium, not a void)
 // ------------------------------------------------------------------
-function buildProceduralScene() {
-  // Ground
+const ROOM_HALF = 12;   // walls sit at x = ±12 and z = ±12
+const ROOM_H = 4.5;     // ceiling height
+
+/**
+ * Build one wall as a group: a dark panel plus 2–3 tall emissive-blue
+ * window openings. Local +Z is the inward-facing normal.
+ * @param {THREE.Material} wallMat
+ * @param {THREE.Material} windowMat
+ * @returns {THREE.Group}
+ */
+function makeWall(wallMat, windowMat) {
+  const g = new THREE.Group();
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_HALF * 2, ROOM_H), wallMat);
+  wall.position.y = ROOM_H / 2;
+  g.add(wall);
+  for (const wx of [-6, 0, 6]) {
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 2.6), windowMat);
+    win.position.set(wx, 2.3, 0.03); // slightly inset toward the interior
+    g.add(win);
+  }
+  return g;
+}
+
+/**
+ * Materials shared across the lobby. Grouped so buildLobby() stays focused
+ * on layout rather than material setup.
+ * @returns {Record<string, THREE.Material>}
+ */
+function lobbyMaterials() {
+  return {
+    floor: new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.9 }),
+    ceil: new THREE.MeshStandardMaterial({ color: 0x14141f, roughness: 0.95, side: THREE.DoubleSide }),
+    wall: new THREE.MeshStandardMaterial({ color: 0x16162a, roughness: 0.9, side: THREE.DoubleSide }),
+    col: new THREE.MeshStandardMaterial({ color: 0x2a2a40, roughness: 0.7 }),
+    window: new THREE.MeshStandardMaterial({ color: 0x16244a, emissive: 0x2a4d8f, emissiveIntensity: 0.6 }),
+    panel: new THREE.MeshStandardMaterial({ color: 0x222018, emissive: 0xffe9c4, emissiveIntensity: 0.5 }),
+  };
+}
+
+/**
+ * Add the four structural columns at (±8, 0, ±8).
+ * @param {THREE.Group} lobby
+ * @param {THREE.Material} colMat
+ */
+function addColumns(lobby, colMat) {
+  for (const cx of [-8, 8]) {
+    for (const cz of [-8, 8]) {
+      const col = new THREE.Mesh(new THREE.BoxGeometry(0.4, ROOM_H, 0.4), colMat);
+      col.position.set(cx, ROOM_H / 2, cz);
+      col.castShadow = true;
+      lobby.add(col);
+    }
+  }
+}
+
+/**
+ * Add three warm emissive ceiling panels, each with a soft fill light.
+ * @param {THREE.Group} lobby
+ * @param {THREE.Material} panelMat
+ */
+function addCeilingPanels(lobby, panelMat) {
+  for (const px of [-6, 0, 6]) {
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 1.2), panelMat);
+    panel.rotation.x = Math.PI / 2;
+    panel.position.set(px, ROOM_H - 0.02, 0);
+    lobby.add(panel);
+    const glow = new THREE.PointLight(0xffe9c4, 6, 14, 2);
+    glow.position.set(px, ROOM_H - 0.4, 0);
+    lobby.add(glow);
+  }
+}
+
+/**
+ * Build a coherent indoor atrium: floor, ceiling, four walls with window
+ * openings, structural columns, and warm emissive ceiling panels.
+ * Returned as a single group so it can be hidden when a splat loads.
+ * @returns {THREE.Group}
+ */
+function buildLobby() {
+  const lobby = new THREE.Group();
+  const mats = lobbyMaterials();
+  const span = ROOM_HALF * 2;
+
+  // Floor + grid (keep the dark grid look)
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(span, span), mats.floor);
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  lobby.add(floor, new THREE.GridHelper(span, span, 0x223344, 0x1a2233));
+
+  // Ceiling + subtle grid
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(span, span), mats.ceil);
+  ceil.rotation.x = Math.PI / 2;
+  ceil.position.y = ROOM_H;
+  const ceilGrid = new THREE.GridHelper(span, 12, 0x223344, 0x1a2233);
+  ceilGrid.position.y = ROOM_H - 0.01;
+  lobby.add(ceil, ceilGrid);
+
+  // Four walls, oriented so the window faces point inward
+  const wallPlacements = [
+    { pos: [0, 0, -ROOM_HALF], rotY: 0 },
+    { pos: [0, 0, ROOM_HALF], rotY: Math.PI },
+    { pos: [-ROOM_HALF, 0, 0], rotY: Math.PI / 2 },
+    { pos: [ROOM_HALF, 0, 0], rotY: -Math.PI / 2 },
+  ];
+  for (const { pos, rotY } of wallPlacements) {
+    const wall = makeWall(mats.wall, mats.window);
+    wall.position.set(pos[0], pos[1], pos[2]);
+    wall.rotation.y = rotY;
+    lobby.add(wall);
+  }
+
+  addColumns(lobby, mats.col);
+  addCeilingPanels(lobby, mats.panel);
+  return lobby;
+}
+
+// Preserved for reference — superseded by buildLobby().
+function buildProceduralScene_old() {
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(60, 60),
     new THREE.MeshLambertMaterial({ color: 0x1a1a2e })
@@ -48,20 +164,11 @@ function buildProceduralScene() {
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
-
-  // Grid overlay
-  const grid = new THREE.GridHelper(60, 60, 0x223344, 0x1a2233);
-  scene.add(grid);
-
-  // Buildings
+  scene.add(new THREE.GridHelper(60, 60, 0x223344, 0x1a2233));
   const buildingMat = new THREE.MeshLambertMaterial({ color: 0x1e2040 });
   const buildingDefs = [
-    [8, 12, 3, 20, 8],
-    [-8, 10, -5, 18, 6],
-    [15, 8, 10, 16, 5],
-    [-15, 14, 8, 22, 10],
-    [0, 6, -18, 12, 4],
-    [20, 10, -8, 20, 7],
+    [8, 12, 3, 20, 8], [-8, 10, -5, 18, 6], [15, 8, 10, 16, 5],
+    [-15, 14, 8, 22, 10], [0, 6, -18, 12, 4], [20, 10, -8, 20, 7],
   ];
   for (const [x, h, z, d, w] of buildingDefs) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), buildingMat);
@@ -70,41 +177,68 @@ function buildProceduralScene() {
     mesh.receiveShadow = true;
     scene.add(mesh);
   }
-
-  // Sidewalk strips
-  const swMat = new THREE.MeshLambertMaterial({ color: 0x22223a });
-  for (let i = -2; i <= 2; i++) {
-    const sw = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 60), swMat);
-    sw.rotation.x = -Math.PI / 2;
-    sw.position.set(i * 2, 0.01, 0);
-    scene.add(sw);
-  }
 }
 
-buildProceduralScene();
+const lobbyGroup = buildLobby();
+scene.add(lobbyGroup);
 
-// Try loading real splat — if available
+// ------------------------------------------------------------------
+// Gaussian splat loading pipeline (@mkkellogg/gaussian-splats-3d)
+// ------------------------------------------------------------------
+const SPLAT_URL = '/assets/scene.splat';
+const SPLAT_MODULE_URL =
+  'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.1/build/gaussian-splats-3d.module.js';
+
 const splatOverlay = document.getElementById('splat-overlay');
 const splatPct = document.getElementById('splat-pct');
+const sceneIndicator = document.getElementById('scene-indicator');
+
+/**
+ * Update the status-bar scene indicator.
+ * @param {boolean} isSplat true → live splat, false → procedural fallback
+ */
+function setSceneIndicator(isSplat) {
+  if (!sceneIndicator) return;
+  sceneIndicator.textContent = isSplat ? '● Live Splat' : '● Procedural';
+  sceneIndicator.style.color = isSplat ? 'var(--teal)' : 'var(--muted)';
+}
+
+// Default to procedural until/unless a splat successfully loads.
+setSceneIndicator(false);
 
 async function tryLoadSplat() {
   try {
-    const { GaussianSplatMesh } = await import(
-      'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.1/build/gaussian-splats-3d.module.js'
-    ).catch(() => null);
-    if (!GaussianSplatMesh) { splatOverlay.classList.add('hidden'); return; }
+    // Skip the (heavy) library import entirely if the file isn't present.
+    const head = await fetch(SPLAT_URL, { method: 'HEAD' });
+    if (!head.ok) throw new Error('scene.splat not found');
 
-    const resp = await fetch('/assets/scene.splat', { method: 'HEAD' });
-    if (!resp.ok) { splatOverlay.classList.add('hidden'); return; }
+    const GaussianSplats3D = await import(SPLAT_MODULE_URL);
+    if (!GaussianSplats3D || !GaussianSplats3D.DropInViewer) {
+      throw new Error('gaussian-splats-3d module unavailable');
+    }
 
     splatOverlay.classList.remove('hidden');
-    const viewer = new GaussianSplatMesh(renderer, camera, scene);
-    await viewer.loadFile('/assets/scene.splat', {
-      onProgress: (pct) => { splatPct.textContent = `${Math.round(pct * 100)}%`; }
+    if (splatPct) splatPct.textContent = '0%';
+
+    const dropIn = new GaussianSplats3D.DropInViewer({ gpuAcceleratedSort: false });
+    await dropIn.addSplatScene(SPLAT_URL, {
+      splatAlphaRemovalThreshold: 5,
+      showLoadingUI: false,
+      onProgress: (percent) => {
+        if (splatPct) splatPct.textContent = `${Math.round(percent)}%`;
+      },
     });
+
+    scene.add(dropIn);
+    if (lobbyGroup) lobbyGroup.visible = false; // splat replaces the lobby
     splatOverlay.classList.add('hidden');
+    setSceneIndicator(true);
+    console.log('Splat loaded successfully');
   } catch {
     splatOverlay.classList.add('hidden');
+    if (lobbyGroup) lobbyGroup.visible = true;
+    setSceneIndicator(false);
+    console.log('Splat not found, using procedural fallback');
   }
 }
 tryLoadSplat();

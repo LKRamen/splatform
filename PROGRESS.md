@@ -59,5 +59,31 @@ None yet.
   otherwise falls back to the procedural rig. Chosen path logged to console.
 - Old `buildCapsulePlaceholder` preserved as `buildCapsulePlaceholder_old`.
 
+### 7.B — Indoor lobby fallback (complete)
+- Replaced the NYC-buildings procedural scene with `buildLobby()` in
+  `viewer.js`, returned as a single toggleable `THREE.Group` (`lobbyGroup`).
+- Atrium: dark floor + grid, ceiling plane at y=4.5 with a subtle grid, four
+  walls at x/z=±12 (each with three tall emissive-blue window openings facing
+  inward), four structural columns at (±8, ±8), and three warm emissive
+  ceiling panels backed by soft point lights. No more black void.
+- Old NYC builder preserved as `buildProceduralScene_old`.
+
+### 7.C — Splat pipeline + indicator (complete)
+- Rewrote the splat loader to use the real `@mkkellogg/gaussian-splats-3d`
+  API (`DropInViewer.addSplatScene`, which extends `THREE.Group` and renders
+  inside our existing loop). The previous code imported a non-existent
+  `GaussianSplatMesh` export and never actually loaded.
+- HEAD-checks `assets/scene.splat` first; on present file it imports the lib
+  and streams the splat, updating the centered overlay
+  "Loading Fordham splat... X%" via `onProgress` (0–100).
+- On success: hides `lobbyGroup`, adds the splat, logs
+  "Splat loaded successfully", sets the status-bar indicator to teal
+  "● Live Splat".
+- On missing/failed load: keeps the lobby visible, logs
+  "Splat not found, using procedural fallback", indicator stays gray
+  "● Procedural".
+- Added `#scene-indicator` to the status bar in `index.html`, next to the
+  connection dot.
+
 ### Next
-- 7.B (indoor lobby fallback) and 7.C (splat pipeline + indicator).
+- Phase 8 — Manipulation Task System (8.1 first).
